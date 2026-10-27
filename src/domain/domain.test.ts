@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getSettings, saveSettings, type MartinaDb } from '../db/database';
+import Dexie from 'dexie';
+import { getDeviceLocal, getSettings, MartinaDb, saveSettings } from '../db/database';
 import { addProduct, newWorld } from '../test/helpers';
 import { exportBackup, importBackup } from './backup';
 import { createClient } from './clients';
@@ -8,7 +9,7 @@ import { registerPayment } from './credit';
 import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, voidLotterySale, voidPrize } from './lottery';
 import { createProduct, updateProduct } from './products';
 import { salesReport, stockAlerts } from './reports';
-import { createSale, returnItems, voidSale } from './sales';
+import { createSale, receiptNumber, returnItems, voidSale } from './sales';
 import { countCorrection, manualMovement } from './stock';
 import { ownerByPin, verifyPin } from './users';
 
@@ -106,7 +107,28 @@ describe('ventas de la tienda', () => {
     ).rejects.toThrow(/No hay suficiente "Leche"/);
     expect((await w.db.products.get(a.id))!.stock).toBe(10);
     expect(await w.db.sales.count()).toBe(0);
-    expect((await getSettings(w.db)).nextSaleNumber).toBe(1);
+    expect((await getDeviceLocal(w.db)).nextSaleNumber).toBe(1);
+  });
+
+  it('cada equipo numera sus recibos con su letra (dos equipos sin internet no repiten número)', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    await w.db.local.put({ key: 'device', deviceId: 'equipo-b', series: 'B', nextSaleNumber: 7 });
+    const sale = await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    expect(receiptNumber(sale)).toBe('B-7');
+    expect((await getDeviceLocal(w.db)).nextSaleNumber).toBe(8);
+    expect(receiptNumber({ number: 3 })).toBe('3');
+  });
+
+  it('la existencia y lo que se debe se guardan como "suma/resta" (se juntan bien al sincronizar)', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const ana = await newClient(w.db, 'Ana');
+    // Otro equipo vendió 3 mientras tanto (llegó por la sincronización): la venta de aquí resta encima, no lo pisa.
+    await w.db.products.update(p.id, { stock: 7 });
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    expect((await w.db.products.get(p.id))!.stock).toBe(5);
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(10000);
   });
 
   it('descuentos y el ITBIS incluido en el precio', async () => {
@@ -274,6 +296,25 @@ describe('lotería (el cuadre del día)', () => {
     const report = await lotteryReport(w.db, '2000-01-01', today());
     expect(report.totals).toMatchObject({ salesCents: 100000, commissionCents: 10000, prizesCents: 20000, deliverCents: 70000 });
     expect(report.days).toHaveLength(1);
+  });
+});
+
+describe('actualizar la app', () => {
+  it('lo que ya estaba guardado con la versión 1 (índices únicos) pasa intacto a la versión 2', async () => {
+    const name = `vieja-${newId()}`;
+    const old = new Dexie(name);
+    old.version(1).stores({ users: 'id, name, role', products: 'id, &sku, &barcode, name, categoryId, supplierId, active, stock', settings: 'key' });
+    await old.table('products').add({ id: 'p1', sku: 'P0001', barcode: '746', name: 'Pan', stock: 4, active: true });
+    await old.table('settings').put({ key: 'main', businessName: 'Colmado', nextSaleNumber: 9 });
+    old.close();
+
+    const upgraded = new MartinaDb(name);
+    expect(await upgraded.products.get('p1')).toMatchObject({ name: 'Pan', stock: 4 });
+    expect((await getSettings(upgraded)).businessName).toBe('Colmado');
+    // Ya no hay índice único: una copia que llegue de otro equipo con el mismo código no rompe la sincronización.
+    await upgraded.products.add({ id: 'p2', sku: 'P0001', barcode: '746', name: 'Pan (otro equipo)', stock: 1, active: true } as never);
+    expect(await upgraded.products.where('barcode').equals('746').count()).toBe(2);
+    expect(await upgraded.local.count()).toBe(0);
   });
 });
 

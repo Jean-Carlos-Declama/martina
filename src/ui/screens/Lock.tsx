@@ -5,7 +5,9 @@ import type { User } from '../../db/types';
 import { createUser, verifyPin } from '../../domain/users';
 import { useUi } from '../context';
 import { Icon } from '../icons';
+import { ROLE_LABELS } from '../format';
 import { Field, PinPad } from '../kit';
+import { LinkFromSetup } from './Devices';
 
 /**
  * Primera vez que se abre: los datos del negocio y luego el PIN de la dueña, con el teclado de números de la app
@@ -45,6 +47,7 @@ export function Setup({ onDone }: { onDone: (user: User) => void }) {
           <button className="btn primary block" type="submit">
             Siguiente: crear mi PIN
           </button>
+          <LinkFromSetup />
         </form>
       </main>
     );
@@ -118,7 +121,7 @@ export function Lock({ onUnlock }: { onUnlock: (user: User) => void }) {
             <div className="user-list">
               {users.map(u => (
                 <button key={u.id} className="btn block" onClick={() => setChosen(u)}>
-                  {u.name} <small className="muted">{u.role === 'owner' ? 'dueña' : 'empleado'}</small>
+                  {u.name} <small className="muted">{ROLE_LABELS[u.role]}</small>
                 </button>
               ))}
             </div>

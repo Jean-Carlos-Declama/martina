@@ -3,8 +3,11 @@
 
 export type Id = string;
 
-/** Rol de quien usa la app: la dueña puede todo; el empleado no anula ventas ni cambia ajustes. */
-export type Role = 'owner' | 'employee';
+/**
+ * Rol de quien usa la app: la dueña puede todo; el empleado vende y anota, pero no anula ni ve ganancias;
+ * "solo mirar" ve todos los números (también ganancias) pero no puede anotar ni cambiar nada.
+ */
+export type Role = 'owner' | 'employee' | 'viewer';
 
 export interface User {
   id: Id;
@@ -104,8 +107,10 @@ export interface SaleLine {
 
 export interface Sale {
   id: Id;
-  /** Número correlativo para el recibo. */
+  /** Número correlativo para el recibo (cada equipo lleva su propia cuenta). */
   number: number;
+  /** Letra del equipo que cobró (A, B...): con varios equipos, el recibo es "#B-12". */
+  series?: string;
   date: string;
   /** Día del cuadre (AAAA-MM-DD, hora local). */
   dayKey: string;
@@ -225,6 +230,28 @@ export interface Settings {
   /** Si se puede vender sin existencia (queda en negativo). */
   allowNegativeStock: boolean;
   lastBackupAt?: string;
+  /** Contador viejo de recibos (antes de sincronizar): ahora cada equipo lleva el suyo en DeviceLocal. */
+  nextSaleNumber: number;
+}
+
+/** Un equipo vinculado al negocio (se ve en todos los equipos; la dueña puede quitarlo). */
+export interface Device {
+  id: Id;
+  /** Nombre para reconocerlo: "iPad de Martina", "Teléfono de Juan". */
+  name: string;
+  /** Letra de sus recibos. */
+  letter: string;
+  linkedAt: string;
+  lastSeenAt: string;
+  /** Si la dueña lo quitó: al conectarse, el equipo borra sus datos y se desvincula. */
+  blocked?: boolean;
+}
+
+/** Datos de ESTE equipo (no se sincronizan): su letra y su contador de recibos. */
+export interface DeviceLocal {
+  key: 'device';
+  deviceId: Id;
+  series?: string;
   nextSaleNumber: number;
 }
 

@@ -147,6 +147,9 @@ button:focus-visible {
   overflow-y: auto;
 }
 .nav-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   font-size: 22px;
   font-weight: 800;
   color: var(--accent);
@@ -1212,4 +1215,50 @@ button.chip {
 .pin-field {
   -webkit-text-security: disc;
   letter-spacing: 0.2em;
+}
+
+/* ---------- Sincronización y equipos ---------- */
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.sync-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.sync-badge.good .dot {
+  background: var(--good);
+}
+.sync-badge.warn .dot {
+  background: var(--warn);
+}
+.sync-badge.bad {
+  color: var(--bad);
+}
+.sync-badge.bad .dot {
+  background: var(--bad);
+}
+.steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.qr-box {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff;
+}
+.qr-box img {
+  width: min(320px, 100%);
+  height: auto;
 }

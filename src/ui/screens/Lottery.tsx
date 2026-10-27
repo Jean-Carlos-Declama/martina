@@ -15,7 +15,7 @@ const QUICK_AMOUNTS = [25, 50, 100, 200, 500];
 
 /** La libreta de la lotería: anotar jugadas y premios, y el cuadre del día. */
 export function Lottery() {
-  const { money, settings, isOwner, user, requireOwner } = useSession();
+  const { money, settings, isOwner, canEdit, user, requireOwner } = useSession();
   const { run, confirm, askText } = useUi();
   const today = dayKeyOf();
   const [dayKey, setDayKey] = useState(today);
@@ -28,6 +28,8 @@ export function Lottery() {
 
   const isToday = dayKey === today;
   const open = report?.status !== 'closed';
+  // "Solo mirar" ve el cuadre pero no anota, no anula ni cierra.
+  const editable = open && canEdit;
   const t = report?.totals;
 
   const voidEntry = async (entry: NonNullable<typeof entries>[number]) => {
@@ -104,7 +106,7 @@ export function Lottery() {
             <Icon name="share" /> Enviar cuadre
           </button>
           {open ? (
-            <button className="btn" onClick={() => void close()}>
+            canEdit && <button className="btn" onClick={() => void close()}>
               <Icon name="lock" /> Cerrar el día
             </button>
           ) : (
@@ -120,15 +122,15 @@ export function Lottery() {
       {t && (
         <div className="stats">
           <Stat label="Venta" value={money(t.salesCents)} sub={plural(t.salesCount, 'jugada', 'jugadas')} />
-          <button className="stat-button" onClick={() => open && void changeCommission()} disabled={!open} title="Cambiar el % de este día">
-            <Stat label={`Comisión ${t.commissionPct}%`} value={money(t.commissionCents)} tone="good" sub={open ? 'toca para cambiar el %' : 'lo que te ganas'} />
+          <button className="stat-button" onClick={() => editable && void changeCommission()} disabled={!editable} title="Cambiar el % de este día">
+            <Stat label={`Comisión ${t.commissionPct}%`} value={money(t.commissionCents)} tone="good" sub={editable ? 'toca para cambiar el %' : 'lo que te ganas'} />
           </button>
           <Stat label="Premios" value={money(t.prizesCents)} tone="bad" sub={plural(t.prizesCount, 'pagado', 'pagados')} />
           <Stat label="A entregar" value={money(t.deliverCents)} tone="accent" big sub={report.creditCents > 0 ? `incluye ${money(report.creditCents)} fiado` : undefined} />
         </div>
       )}
 
-      {isToday && open && <EntryForm userId={user.id} />}
+      {isToday && editable && <EntryForm userId={user.id} />}
       {!isToday && open && (
         <p className="notice">Este día quedó abierto. Las jugadas nuevas se anotan siempre en el día de hoy; aquí solo se puede revisar, anular o cerrar.</p>
       )}
@@ -201,7 +203,7 @@ export function Lottery() {
                   </small>
                 </span>
                 <span className={`amount ${e.kind === 'prize' ? 'bad-text' : ''}`}>{money(e.amountCents)}</span>
-                {open && e.status === 'done' && (
+                {editable && e.status === 'done' && (
                   <button className="icon-btn" onClick={() => void voidEntry(e)} aria-label="Anular">
                     <Icon name="trash" size={20} />
                   </button>

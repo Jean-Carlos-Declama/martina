@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Claves de Dexie Cloud y del enlace: NUNCA a GitHub (el repositorio es público)
+dexie-cloud.key
+dexie-cloud.json
+enlace/.dev.vars
+enlace/.activacion*
+.wrangler
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

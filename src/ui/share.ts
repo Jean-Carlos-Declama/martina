@@ -1,5 +1,6 @@
 import type { Client, Sale, Settings } from '../db/types';
 import type { DayReport } from '../domain/lottery';
+import { receiptNumber } from '../domain/sales';
 import { dayLabel, formatDateTime, formatMoney, formatQty, PAYMENT_LABELS } from './format';
 
 // Textos para mandar por WhatsApp (recibo, cuadre de lotería, recordatorio de fiado) y cómo abrirlo.
@@ -8,7 +9,7 @@ export function receiptText(sale: Sale, settings: Settings): string {
   const money = (cents: number) => formatMoney(cents, settings.currency);
   const lines = [
     `*${settings.businessName}*`,
-    `Recibo #${sale.number} · ${formatDateTime(sale.date)}`,
+    `Recibo #${receiptNumber(sale)} · ${formatDateTime(sale.date)}`,
     sale.clientName ? `Cliente: ${sale.clientName}` : '',
     '',
     ...sale.lines.map(line => {

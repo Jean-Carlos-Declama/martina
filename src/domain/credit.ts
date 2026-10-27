@@ -1,3 +1,4 @@
+import { add } from 'dexie';
 import type { MartinaDb } from '../db/database';
 import type { CreditEntry, Id } from '../db/types';
 import { audit } from './audit';
@@ -19,11 +20,12 @@ export async function addCredit(
   const client = await database.clients.get(clientId);
   if (!client) throw new BusinessError('El cliente no existe.');
   const balance = client.balanceCents + amountCents;
-  if (kind === 'sale' && client.creditLimitCents && balance > client.creditLimitCents)
+  if ((kind === 'sale' || kind === 'lottery') && client.creditLimitCents && balance > client.creditLimitCents)
     throw new BusinessError(`${client.name} pasaría su límite de fiado.`);
   const entry: CreditEntry = { id: newId(), clientId, date: nowIso(), kind, amountCents, balanceAfterCents: balance, saleId, userId, note };
   await database.credit.add(entry);
-  await database.clients.update(clientId, { balanceCents: balance });
+  // Súmale/réstale (no "ponle X"): así dos equipos fiando o cobrando a la vez no se pisan al sincronizar.
+  await database.clients.update(clientId, { balanceCents: add(amountCents) });
   return entry;
 }
 

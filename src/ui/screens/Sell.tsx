@@ -4,7 +4,7 @@ import { db } from '../../db/database';
 import type { PaymentMethod, Product, Sale } from '../../db/types';
 import { newId } from '../../domain/common';
 import { matchesSearch, normalize } from '../../domain/products';
-import { createSale } from '../../domain/sales';
+import { createSale, receiptNumber } from '../../domain/sales';
 import { useSession, useUi } from '../context';
 import { formatQty, moneyField, parseMoney, parseQty, PAYMENT_LABELS, plural, qtyWithUnit } from '../format';
 import { Icon } from '../icons';
@@ -377,11 +377,11 @@ export function ReceiptModal({ sale, onClose, children }: { sale: Sale; onClose:
   const text = receiptText(sale, settings);
   return (
     <Modal
-      title={`Recibo #${sale.number}`}
+      title={`Recibo #${receiptNumber(sale)}`}
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={() => void shareText(text, `Recibo #${sale.number}`)}>
+          <button className="btn" onClick={() => void shareText(text, `Recibo #${receiptNumber(sale)}`)}>
             <Icon name="share" /> Compartir
           </button>
           <button className="btn whatsapp" onClick={() => openWhatsApp(text, client?.phone)}>

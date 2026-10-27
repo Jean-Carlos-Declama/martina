@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { Screen } from '../../App';
+import { isLinked } from '../../db/cloud';
 import { db } from '../../db/database';
 import { dayKeyOf } from '../../domain/common';
 import { computeDay } from '../../domain/lottery';
@@ -8,11 +9,12 @@ import { useSession } from '../context';
 import { dayLabel, formatQty, plural } from '../format';
 import { Icon } from '../icons';
 import { Stat } from '../kit';
+import { SyncBadge } from './Devices';
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
 export function Home({ go }: { go: (screen: Screen) => void }) {
-  const { user, isOwner, money, settings } = useSession();
+  const { user, isOwner, canEdit, seesMoney, money, settings } = useSession();
   const today = dayKeyOf();
   const lottery = useLiveQuery(() => computeDay(db, today), [today]);
   const store = useLiveQuery(() => salesReport(db, today, today, 5), [today]);
@@ -21,7 +23,8 @@ export function Home({ go }: { go: (screen: Screen) => void }) {
     const clients = await db.clients.filter(c => c.balanceCents > 0).toArray();
     return { count: clients.length, cents: clients.reduce((sum, c) => sum + c.balanceCents, 0) };
   }, []);
-  const backupOld = !settings.lastBackupAt || Date.now() - Date.parse(settings.lastBackupAt) > WEEK;
+  // Vinculado, la nube ya guarda copia: el aviso de respaldo es para cuando todo vive solo en este equipo.
+  const backupOld = !isLinked() && (!settings.lastBackupAt || Date.now() - Date.parse(settings.lastBackupAt) > WEEK);
 
   return (
     <div className="page">
@@ -29,15 +32,18 @@ export function Home({ go }: { go: (screen: Screen) => void }) {
         <div>
           <h1>Hola, {user.name}</h1>
           <p className="muted">{dayLabel(today)}</p>
+          <SyncBadge />
         </div>
-        <div className="actions">
-          <button className="btn primary" onClick={() => go('lottery')}>
-            <Icon name="ticket" /> Anotar lotería
-          </button>
-          <button className="btn primary" onClick={() => go('sell')}>
-            <Icon name="cart" /> Vender
-          </button>
-        </div>
+        {canEdit && (
+          <div className="actions">
+            <button className="btn primary" onClick={() => go('lottery')}>
+              <Icon name="ticket" /> Anotar lotería
+            </button>
+            <button className="btn primary" onClick={() => go('sell')}>
+              <Icon name="cart" /> Vender
+            </button>
+          </div>
+        )}
       </header>
 
       {isOwner && backupOld && (
@@ -78,7 +84,7 @@ export function Home({ go }: { go: (screen: Screen) => void }) {
         {store && (
           <div className="stats">
             <Stat label="Vendido" value={money(store.salesCents)} sub={plural(store.salesCount, 'venta', 'ventas')} />
-            {isOwner && <Stat label="Ganancia" value={money(store.profitCents)} tone="good" />}
+            {seesMoney && <Stat label="Ganancia" value={money(store.profitCents)} tone="good" />}
             {debt && <Stat label="Fiado por cobrar" value={money(debt.cents)} sub={plural(debt.count, 'cliente', 'clientes')} tone={debt.cents > 0 ? 'bad' : 'plain'} />}
           </div>
         )}

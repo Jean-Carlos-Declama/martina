@@ -16,7 +16,7 @@ const Scanner = lazy(() => import('../Scanner'));
 type Filter = 'active' | 'low' | 'out' | 'archived';
 
 export default function Products() {
-  const { money, isOwner, requireOwner } = useSession();
+  const { money, seesMoney, canEdit, requireOwner } = useSession();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('active');
   const [category, setCategory] = useState('');
@@ -43,14 +43,16 @@ export default function Products() {
     <div className="page">
       <header className="page-head">
         <h1>Productos</h1>
-        <button
-          className="btn primary"
-          onClick={async () => {
-            if (await requireOwner('Agregar producto: autorización de la dueña')) setEditing('new');
-          }}
-        >
-          <Icon name="plus" /> Nuevo producto
-        </button>
+        {canEdit && (
+          <button
+            className="btn primary"
+            onClick={async () => {
+              if (await requireOwner('Agregar producto: autorización de la dueña')) setEditing('new');
+            }}
+          >
+            <Icon name="plus" /> Nuevo producto
+          </button>
+        )}
       </header>
       <div className="toolbar">
         <div className="search-bar">
@@ -100,7 +102,7 @@ export default function Products() {
                   <small className={p.stock <= 0 ? 'bad-text' : p.stock <= p.minStock ? 'warn-text' : 'muted'}>
                     {qtyWithUnit(p.stock, p.unit)}
                   </small>
-                  {isOwner && <small className="muted">costo {money(p.costCents)}</small>}
+                  {seesMoney && <small className="muted">costo {money(p.costCents)}</small>}
                 </span>
               </button>
             </li>
@@ -320,7 +322,7 @@ function ProductForm({ product, onClose }: { product?: Product; onClose: () => v
 type StockAction = 'purchase' | 'out' | 'count';
 
 function ProductDetail({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: (product: Product) => void }) {
-  const { money, isOwner, requireOwner } = useSession();
+  const { money, seesMoney, canEdit, requireOwner } = useSession();
   const { run } = useUi();
   const product = useLiveQuery(() => db.products.get(id), [id]);
   const movements = useLiveQuery(() => db.movements.where('[productId+date]').between([id, ''], [id, '￿']).reverse().limit(100).toArray(), [id]);
@@ -339,20 +341,22 @@ function ProductDetail({ id, onClose, onEdit }: { id: string; onClose: () => voi
       onClose={onClose}
       wide
       footer={
-        <>
-          <button
-            className="btn"
-            onClick={async () => {
-              const owner = await requireOwner();
-              if (owner) await run(() => setProductActive(db, product.id, !product.active, owner.id), product.active ? 'Producto archivado' : 'Producto reactivado');
-            }}
-          >
-            {product.active ? 'Archivar' : 'Reactivar'}
-          </button>
-          <button className="btn" onClick={() => onEdit(product)}>
-            <Icon name="edit" /> Editar
-          </button>
-        </>
+        canEdit && (
+          <>
+            <button
+              className="btn"
+              onClick={async () => {
+                const owner = await requireOwner();
+                if (owner) await run(() => setProductActive(db, product.id, !product.active, owner.id), product.active ? 'Producto archivado' : 'Producto reactivado');
+              }}
+            >
+              {product.active ? 'Archivar' : 'Reactivar'}
+            </button>
+            <button className="btn" onClick={() => onEdit(product)}>
+              <Icon name="edit" /> Editar
+            </button>
+          </>
+        )
       }
     >
       <div className="detail-head">
@@ -368,7 +372,7 @@ function ProductDetail({ id, onClose, onEdit }: { id: string; onClose: () => voi
           <div className="stat plain">
             <span className="stat-label">Precio</span>
             <strong className="stat-value">{money(product.priceCents)}</strong>
-            {isOwner && <span className="stat-sub">costo {money(product.costCents)}</span>}
+            {seesMoney && <span className="stat-sub">costo {money(product.costCents)}</span>}
           </div>
         </div>
       </div>
@@ -378,17 +382,19 @@ function ProductDetail({ id, onClose, onEdit }: { id: string; onClose: () => voi
         {product.brand ? ` · ${product.brand}` : ''}
         {product.description ? ` · ${product.description}` : ''}
       </p>
-      <div className="actions wrap">
-        <button className="btn primary" onClick={() => void start('purchase')}>
-          <Icon name="download" /> Entrada de mercancía
-        </button>
-        <button className="btn" onClick={() => void start('out')}>
-          <Icon name="upload" /> Salida o ajuste
-        </button>
-        <button className="btn" onClick={() => void start('count')}>
-          <Icon name="check" /> Conteo físico
-        </button>
-      </div>
+      {canEdit && (
+        <div className="actions wrap">
+          <button className="btn primary" onClick={() => void start('purchase')}>
+            <Icon name="download" /> Entrada de mercancía
+          </button>
+          <button className="btn" onClick={() => void start('out')}>
+            <Icon name="upload" /> Salida o ajuste
+          </button>
+          <button className="btn" onClick={() => void start('count')}>
+            <Icon name="check" /> Conteo físico
+          </button>
+        </div>
+      )}
       <h3>Historial</h3>
       {movements && movements.length > 0 ? (
         <div className="table-wrap">

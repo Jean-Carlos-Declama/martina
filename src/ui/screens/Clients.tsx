@@ -21,7 +21,7 @@ const CREDIT_LABELS: Record<CreditEntry['kind'], string> = {
 };
 
 export default function Clients() {
-  const { money } = useSession();
+  const { money, canEdit } = useSession();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'debt' | 'archived'>('all');
   const [editing, setEditing] = useState<Client | 'new' | null>(null);
@@ -44,9 +44,11 @@ export default function Clients() {
           <h1>Clientes</h1>
           <p className="muted">Fiado por cobrar: {money(totalDebt)}</p>
         </div>
-        <button className="btn primary" onClick={() => setEditing('new')}>
-          <Icon name="plus" /> Nuevo cliente
-        </button>
+        {canEdit && (
+          <button className="btn primary" onClick={() => setEditing('new')}>
+            <Icon name="plus" /> Nuevo cliente
+          </button>
+        )}
       </header>
       <div className="toolbar">
         <div className="search-bar">
@@ -145,7 +147,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
 }
 
 function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: (client: Client) => void }) {
-  const { money, settings, user, requireOwner } = useSession();
+  const { money, settings, user, canEdit, requireOwner } = useSession();
   const { run } = useUi();
   const [paying, setPaying] = useState(false);
   const client = useLiveQuery(() => db.clients.get(id), [id]);
@@ -169,20 +171,22 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
       onClose={onClose}
       wide
       footer={
-        <>
-          <button
-            className="btn"
-            onClick={async () => {
-              const owner = await requireOwner();
-              if (owner) await run(() => setClientActive(db, client.id, !client.active, owner.id), client.active ? 'Cliente archivado' : 'Cliente reactivado');
-            }}
-          >
-            {client.active ? 'Archivar' : 'Reactivar'}
-          </button>
-          <button className="btn" onClick={() => onEdit(client)}>
-            <Icon name="edit" /> Editar
-          </button>
-        </>
+        canEdit && (
+          <>
+            <button
+              className="btn"
+              onClick={async () => {
+                const owner = await requireOwner();
+                if (owner) await run(() => setClientActive(db, client.id, !client.active, owner.id), client.active ? 'Cliente archivado' : 'Cliente reactivado');
+              }}
+            >
+              {client.active ? 'Archivar' : 'Reactivar'}
+            </button>
+            <button className="btn" onClick={() => onEdit(client)}>
+              <Icon name="edit" /> Editar
+            </button>
+          </>
+        )
       }
     >
       <div className="stats">
@@ -194,14 +198,16 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
         {client.phone ? `Tel. ${client.phone}` : 'Sin teléfono'}
         {client.notes ? ` · ${client.notes}` : ''}
       </p>
-      <div className="actions wrap">
-        <button className="btn primary" disabled={client.balanceCents <= 0} onClick={() => setPaying(true)}>
-          <Icon name="download" /> Registrar abono
-        </button>
-        <button className="btn whatsapp" disabled={client.balanceCents <= 0} onClick={() => openWhatsApp(debtText(client, settings), client.phone)}>
-          <Icon name="chat" /> Recordarle por WhatsApp
-        </button>
-      </div>
+      {canEdit && (
+        <div className="actions wrap">
+          <button className="btn primary" disabled={client.balanceCents <= 0} onClick={() => setPaying(true)}>
+            <Icon name="download" /> Registrar abono
+          </button>
+          <button className="btn whatsapp" disabled={client.balanceCents <= 0} onClick={() => openWhatsApp(debtText(client, settings), client.phone)}>
+            <Icon name="chat" /> Recordarle por WhatsApp
+          </button>
+        </div>
+      )}
       <h3>Cuenta</h3>
       {history && history.length > 0 ? (
         <div className="table-wrap">

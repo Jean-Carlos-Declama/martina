@@ -1,0 +1,8 @@
+# El enlace de Martina en Cloudflare (ver src/index.js). Se publica con publicar.ps1.
+name = "martina-enlace"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGINS = "https://jean-carlos-declama.github.io,http://localhost:4173,http://localhost:5173"

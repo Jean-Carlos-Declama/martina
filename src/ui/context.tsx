@@ -180,6 +180,10 @@ interface Session {
   user: User;
   settings: Settings;
   isOwner: boolean;
+  /** Puede anotar y cambiar cosas (todos menos "solo mirar"). */
+  canEdit: boolean;
+  /** Ve costos y ganancias (la dueña y "solo mirar"; el empleado no). */
+  seesMoney: boolean;
   money: (cents: number) => string;
   lock: () => void;
   /** La dueña: si es ella la que está, enseguida; si es el empleado, pide el PIN de ella. */
@@ -196,6 +200,8 @@ export function SessionProvider(props: { user: User; settings: Settings; lock: (
       user,
       settings,
       isOwner: user.role === 'owner',
+      canEdit: user.role !== 'viewer',
+      seesMoney: user.role !== 'employee',
       money: cents => formatMoney(cents, settings.currency),
       lock,
       requireOwner: async title => (user.role === 'owner' ? user : askOwner(title)),

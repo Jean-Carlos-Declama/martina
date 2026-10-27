@@ -1,4 +1,4 @@
-import type { MovementType, PaymentMethod } from '../db/types';
+import type { MovementType, PaymentMethod, Role } from '../db/types';
 import { formatMoney } from '../domain/common';
 
 export { formatMoney };
@@ -80,3 +80,9 @@ export function qtyWithUnit(quantity: number, unit: string): string {
 }
 
 export const UNITS = ['unidad', 'libra', 'onza', 'kilo', 'litro', 'galón', 'paquete', 'caja', 'docena', 'funda', 'botella'];
+
+export const ROLE_LABELS: Record<Role, string> = {
+  owner: 'dueña',
+  employee: 'empleado',
+  viewer: 'solo mirar',
+};

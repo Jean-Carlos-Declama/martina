@@ -8,10 +8,11 @@ import { deleteCategory, saveCategory, saveSupplier } from '../../domain/catalog
 import { BusinessError, dayKeyOf, nowIso } from '../../domain/common';
 import { changePin, createUser, resetPin, setUserActive } from '../../domain/users';
 import { useSession, useUi } from '../context';
-import { formatDateTime } from '../format';
+import { formatDateTime, ROLE_LABELS } from '../format';
 import { Icon } from '../icons';
 import { Field, Modal } from '../kit';
 import { shareOrDownload } from '../share';
+import { DevicesSection } from './Devices';
 
 export default function Settings() {
   const { isOwner, settings } = useSession();
@@ -20,6 +21,7 @@ export default function Settings() {
       <header className="page-head">
         <h1>Ajustes</h1>
       </header>
+      <DevicesSection />
       {isOwner && <BackupSection />}
       {/* La llave hace que el formulario se vuelva a llenar cuando los ajustes guardados cambian. */}
       {isOwner && <BusinessSection key={JSON.stringify(settings)} />}
@@ -166,7 +168,7 @@ function SecuritySection() {
             {users?.map(u => (
               <li key={u.id} className={u.active ? '' : 'voided'}>
                 <span className="grow">
-                  <strong>{u.name}</strong> <small className="muted">{u.role === 'owner' ? 'dueña' : 'empleado'}</small>
+                  <strong>{u.name}</strong> <small className="muted">{ROLE_LABELS[u.role]}</small>
                 </span>
                 {u.id !== user.id && (
                   <>
@@ -260,6 +262,7 @@ function AddUserModal({ onClose }: { onClose: () => void }) {
           {id => (
             <select id={id} value={role} onChange={e => setRole(e.target.value as Role)}>
               <option value="employee">Empleado: vender, anotar lotería, cobrar fiado</option>
+              <option value="viewer">Solo mirar: ve todos los números, no anota nada</option>
               <option value="owner">Dueña: todo</option>
             </select>
           )}
@@ -268,7 +271,10 @@ function AddUserModal({ onClose }: { onClose: () => void }) {
           {id => <input id={id} className="pin-field" inputMode="numeric" autoComplete="off" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} />}
         </Field>
       </div>
-      <p className="hint">El empleado no ve costos ni ganancias, y para anular, devolver, cerrar el día o mover inventario necesita el PIN de la dueña.</p>
+      <p className="hint">
+        El empleado no ve costos ni ganancias, y para anular, devolver, cerrar el día o mover inventario necesita el PIN de la dueña. «Solo mirar» ve todo (también
+        ganancias y reportes) pero no puede anotar ni cambiar nada.
+      </p>
     </Modal>
   );
 }

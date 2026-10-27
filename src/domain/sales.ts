@@ -1,4 +1,4 @@
-import { getSettings, saveSettings, type MartinaDb } from '../db/database';
+import { getDeviceLocal, getSettings, type MartinaDb } from '../db/database';
 import type { Id, PaymentMethod, Sale, SaleLine } from '../db/types';
 import { audit } from './audit';
 import { BusinessError, dayKeyOf, newId, nowIso } from './common';
@@ -34,7 +34,7 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
   if (input.lines.length === 0) throw new BusinessError('La venta no tiene productos.');
   return database.transaction(
     'rw',
-    [database.products, database.movements, database.sales, database.settings, database.clients, database.credit, database.audit],
+    [database.products, database.movements, database.sales, database.settings, database.clients, database.credit, database.audit, database.local],
     async () => {
       // Si ya se cobró con esta misma llave (doble toque, reintento), se devuelve la misma venta.
       const repeated = await database.sales.where('requestId').equals(input.requestId).first();
@@ -42,6 +42,8 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
 
       const dayKey = dayKeyOf();
       const settings = await getSettings(database);
+      // Cada equipo numera sus recibos (con su letra si hay varios): dos equipos sin internet no repiten número.
+      const device = await getDeviceLocal(database);
 
       const lines: SaleLine[] = [];
       for (const item of input.lines) {
@@ -77,7 +79,8 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
 
       const sale: Sale = {
         id: newId(),
-        number: settings.nextSaleNumber,
+        number: device.nextSaleNumber,
+        series: device.series,
         date: nowIso(),
         dayKey,
         clientId: input.clientId,
@@ -103,14 +106,19 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
           docId: sale.id,
           unitCostCents: line.costCents,
           allowNegative: settings.allowNegativeStock,
-          reason: `Venta #${sale.number}`,
+          reason: `Venta #${receiptNumber(sale)}`,
         });
       }
-      if (input.payment === 'credit') await addCredit(database, input.clientId!, total, 'sale', input.userId, sale.id, `Venta #${sale.number}`);
-      await saveSettings({ ...settings, nextSaleNumber: settings.nextSaleNumber + 1 }, database);
+      if (input.payment === 'credit') await addCredit(database, input.clientId!, total, 'sale', input.userId, sale.id, `Venta #${receiptNumber(sale)}`);
+      await database.local.put({ ...device, nextSaleNumber: device.nextSaleNumber + 1 });
       return sale;
     },
   );
+}
+
+/** El número del recibo como se muestra: "12", o "B-12" si hay varios equipos. */
+export function receiptNumber(sale: Pick<Sale, 'number' | 'series'>): string {
+  return sale.series ? `${sale.series}-${sale.number}` : String(sale.number);
 }
 
 /** El ITBIS que va incluido en el precio (repartiendo el descuento general en proporción). */
@@ -150,14 +158,14 @@ export async function voidSale(database: MartinaDb, saleId: Id, ownerId: Id, rea
           docType: 'sale',
           docId: sale.id,
           unitCostCents: line.costCents,
-          reason: `Anulación venta #${sale.number}: ${reason}`,
+          reason: `Anulación venta #${receiptNumber(sale)}: ${reason}`,
         });
       }
       if (sale.payment === 'credit' && sale.clientId)
-        await addCredit(database, sale.clientId, -sale.totalCents, 'saleVoid', ownerId, sale.id, `Anulación venta #${sale.number}`);
+        await addCredit(database, sale.clientId, -sale.totalCents, 'saleVoid', ownerId, sale.id, `Anulación venta #${receiptNumber(sale)}`);
       const voided: Sale = { ...sale, status: 'void', voidedAt: nowIso(), voidedBy: ownerId, voidReason: reason.trim() };
       await database.sales.put(voided);
-      await audit(database, ownerId, 'anular', 'venta', sale.id, `#${sale.number}: ${reason.trim()}`);
+      await audit(database, ownerId, 'anular', 'venta', sale.id, `#${receiptNumber(sale)}: ${reason.trim()}`);
       return voided;
     },
   );
@@ -198,7 +206,7 @@ export async function returnItems(
         docType: 'sale',
         docId: sale.id,
         unitCostCents: line.costCents,
-        reason: `Devolución venta #${sale.number}: ${reason}`,
+        reason: `Devolución venta #${receiptNumber(sale)}: ${reason}`,
       });
       refundCents += refundOf(sale, line, item.quantity);
     }
@@ -206,7 +214,7 @@ export async function returnItems(
     if (sale.payment === 'credit' && sale.clientId) {
       const client = await database.clients.get(sale.clientId);
       const amount = Math.min(refundCents, Math.max(0, client?.balanceCents ?? 0));
-      if (amount > 0) await addCredit(database, sale.clientId, -amount, 'adjust', ownerId, sale.id, `Devolución venta #${sale.number}`);
+      if (amount > 0) await addCredit(database, sale.clientId, -amount, 'adjust', ownerId, sale.id, `Devolución venta #${receiptNumber(sale)}`);
     }
     await audit(database, ownerId, 'devolución', 'venta', sale.id, reason.trim());
   });

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { db } from '../../db/database';
 import type { Sale } from '../../db/types';
 import { dayKeyOf } from '../../domain/common';
-import { returnItems, voidSale } from '../../domain/sales';
+import { receiptNumber, returnItems, voidSale } from '../../domain/sales';
 import { useSession, useUi } from '../context';
 import { dayLabel, formatQty, formatTime, parseQty, PAYMENT_LABELS, plural, shiftDay } from '../format';
 import { Icon } from '../icons';
@@ -55,7 +55,7 @@ export default function SalesHistory() {
           {sales?.map(s => (
             <li key={s.id} className={s.status === 'void' ? 'voided' : ''}>
               <button className="row-button" onClick={() => setViewing(s.id)}>
-                <span className="tag">#{s.number}</span>
+                <span className="tag">#{receiptNumber(s)}</span>
                 <span className="grow">
                   <strong>{s.clientName ?? 'Cliente general'}</strong>
                   <small className="muted">
@@ -75,7 +75,7 @@ export default function SalesHistory() {
 }
 
 function SaleDetail({ sale, onClose }: { sale: Sale; onClose: () => void }) {
-  const { requireOwner } = useSession();
+  const { requireOwner, canEdit } = useSession();
   const { run, askText, confirm } = useUi();
   const [returning, setReturning] = useState<string | null>(null);
   const users = useLiveQuery(async () => new Map((await db.users.toArray()).map(u => [u.id, u.name])), []);
@@ -83,7 +83,7 @@ function SaleDetail({ sale, onClose }: { sale: Sale; onClose: () => void }) {
   const cancel = async () => {
     const owner = await requireOwner('Anular venta: autorización de la dueña');
     if (!owner) return;
-    const reason = await askText({ title: `Anular venta #${sale.number}`, message: 'La mercancía vuelve al inventario y, si era fiada, se le quita al cliente.', label: '¿Por qué se anula?', okText: 'Anular', danger: true });
+    const reason = await askText({ title: `Anular venta #${receiptNumber(sale)}`, message: 'La mercancía vuelve al inventario y, si era fiada, se le quita al cliente.', label: '¿Por qué se anula?', okText: 'Anular', danger: true });
     if (reason && (await confirm({ title: '¿Seguro?', message: 'Una venta anulada no se puede recuperar.', okText: 'Sí, anular', danger: true })))
       await run(() => voidSale(db, sale.id, owner.id, reason), 'Venta anulada');
   };
@@ -99,7 +99,7 @@ function SaleDetail({ sale, onClose }: { sale: Sale; onClose: () => void }) {
         Cobró: {users?.get(sale.userId) ?? '—'}
         {sale.status === 'void' && ` · Anulada: ${sale.voidReason ?? ''}`}
       </p>
-      {sale.status === 'done' && (
+      {sale.status === 'done' && canEdit && (
         <div className="actions wrap">
           <button className="btn" onClick={() => void startReturn()}>
             Devolver productos
@@ -125,7 +125,7 @@ function ReturnModal({ sale, ownerId, onClose }: { sale: Sale; ownerId: string; 
 
   return (
     <Modal
-      title={`Devolución de la venta #${sale.number}`}
+      title={`Devolución de la venta #${receiptNumber(sale)}`}
       onClose={onClose}
       footer={
         <>

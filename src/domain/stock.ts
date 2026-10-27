@@ -1,3 +1,4 @@
+import { add } from 'dexie';
 import type { MartinaDb } from '../db/database';
 import type { Id, Movement, MovementType } from '../db/types';
 import { BusinessError, newId, nowIso } from './common';
@@ -62,7 +63,9 @@ export async function recordMovement(database: MartinaDb, input: MovementInput):
     docId: input.docId,
   };
   await database.movements.add(movement);
-  await database.products.update(product.id, { stock: stockAfter, updatedAt: movement.date });
+  // "Súmale/réstale", no "ponle X": si dos equipos venden lo mismo sin internet, al sincronizar se juntan las dos
+  // ventas en vez de que una borre a la otra.
+  await database.products.update(product.id, { stock: add(input.quantity), updatedAt: movement.date });
   return movement;
 }
 

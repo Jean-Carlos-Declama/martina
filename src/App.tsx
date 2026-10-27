@@ -1,10 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { db, getSettings } from './db/database';
+import { isLinked, parseLinkCode, touchDevice, unlinkThisDevice } from './db/cloud';
+import { db, getDeviceLocal, getSettings } from './db/database';
 import type { User } from './db/types';
-import { SessionProvider, UiProvider, useSession } from './ui/context';
+import { SessionProvider, UiProvider, useSession, useUi } from './ui/context';
 import { Icon, type IconName } from './ui/icons';
+import { LinkLanding, SyncBadge } from './ui/screens/Devices';
 import { Home } from './ui/screens/Home';
 import { Lock, Setup } from './ui/screens/Lock';
 import { Lottery } from './ui/screens/Lottery';
@@ -19,21 +21,23 @@ const SettingsScreen = lazy(() => import('./ui/screens/Settings'));
 
 export type Screen = 'home' | 'lottery' | 'sell' | 'products' | 'clients' | 'sales' | 'reports' | 'settings';
 
-const NAV: { screen: Screen; label: string; icon: IconName; ownerOnly?: boolean }[] = [
+/** `seesMoney`: solo la dueña y "solo mirar" (el empleado no ve ganancias); `edits`: no para "solo mirar". */
+const NAV: { screen: Screen; label: string; icon: IconName; seesMoney?: boolean; edits?: boolean }[] = [
   { screen: 'home', label: 'Inicio', icon: 'home' },
   { screen: 'lottery', label: 'Lotería', icon: 'ticket' },
-  { screen: 'sell', label: 'Vender', icon: 'cart' },
+  { screen: 'sell', label: 'Vender', icon: 'cart', edits: true },
   { screen: 'products', label: 'Productos', icon: 'box' },
   { screen: 'clients', label: 'Clientes', icon: 'users' },
   { screen: 'sales', label: 'Ventas', icon: 'receipt' },
-  { screen: 'reports', label: 'Reportes', icon: 'chart', ownerOnly: true },
+  { screen: 'reports', label: 'Reportes', icon: 'chart', seesMoney: true },
   { screen: 'settings', label: 'Ajustes', icon: 'gear' },
 ];
 
-export default function App() {
+export default function App({ startError }: { startError?: unknown }) {
   const userCount = useLiveQuery(() => db.users.count(), []);
   const settings = useLiveQuery(() => getSettings(), []);
   const [user, setUser] = useState<User | null>(null);
+  const [landingCode, setLandingCode] = useState(() => parseLinkCode(location.hash));
   const lock = useCallback(() => setUser(null), []);
 
   // Pedirle al iPad que no borre los datos de la app aunque le falte espacio.
@@ -42,12 +46,20 @@ export default function App() {
   }, []);
 
   if (userCount === undefined || !settings) return <div className="splash">Martina</div>;
+  const closeLanding = () => {
+    history.replaceState(null, '', location.pathname);
+    setLandingCode(null);
+  };
   return (
     <UiProvider>
-      {user ? (
+      {landingCode && !isLinked() ? (
+        <LinkLanding code={landingCode} onDone={closeLanding} />
+      ) : user ? (
         <SessionProvider user={user} settings={settings} lock={lock}>
           <Shell />
         </SessionProvider>
+      ) : userCount === 0 && isLinked() ? (
+        <Downloading error={startError} />
       ) : userCount === 0 ? (
         <Setup onDone={setUser} />
       ) : (
@@ -58,10 +70,40 @@ export default function App() {
   );
 }
 
+/** Equipo recién vinculado que todavía no tiene lo del negocio (sin internet o bajando). */
+function Downloading({ error }: { error?: unknown }) {
+  return (
+    <main className="lock-screen">
+      <div className="card lock">
+        <h1>Bajando lo del negocio…</h1>
+        <SyncBadge />
+        {error ? <p className="error-text">{error instanceof Error ? error.message : 'No se pudo conectar.'}</p> : null}
+        <p className="muted">Hace falta internet la primera vez. Cuando termine, sale la pantalla para poner el PIN.</p>
+        <button className="btn" onClick={() => location.reload()}>
+          Intentar otra vez
+        </button>
+      </div>
+    </main>
+  );
+}
+
 function Shell() {
-  const { user, isOwner, settings, lock } = useSession();
+  const { user, seesMoney, canEdit, settings, lock } = useSession();
+  const { toast } = useUi();
   const [screen, setScreen] = useState<Screen>('home');
   const lastActivity = useRef(Date.now());
+
+  // Equipos vinculados: anotar que se usó, y si la dueña lo quitó, borrarse y salir.
+  const blocked = useLiveQuery(async () => (isLinked() ? (await db.devices.get((await getDeviceLocal(db)).deviceId))?.blocked === true : false), []);
+  useEffect(() => {
+    void touchDevice().catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (!blocked) return;
+    toast('La dueña quitó este equipo: se borran los datos de Martina aquí.', 'error');
+    const timer = setTimeout(() => void unlinkThisDevice(), 3000);
+    return () => clearTimeout(timer);
+  }, [blocked, toast]);
 
   // Se bloquea sola si nadie la toca en un rato (así un cliente no ve ni toca nada).
   useEffect(() => {
@@ -83,11 +125,14 @@ function Shell() {
     };
   }, [settings.lockMinutes, lock]);
 
-  const nav = NAV.filter(item => !item.ownerOnly || isOwner);
+  const nav = NAV.filter(item => (!item.seesMoney || seesMoney) && (!item.edits || canEdit));
   return (
     <div className="shell">
       <nav className="nav" aria-label="Menú">
-        <div className="nav-brand">{settings.businessName}</div>
+        <div className="nav-brand">
+          {settings.businessName}
+          <SyncBadge />
+        </div>
         {nav.map(item => (
           <button key={item.screen} className={screen === item.screen ? 'on' : ''} aria-current={screen === item.screen ? 'page' : undefined} onClick={() => setScreen(item.screen)}>
             <Icon name={item.icon} />
@@ -103,11 +148,11 @@ function Shell() {
         <Suspense fallback={<p className="muted center">Cargando…</p>}>
           {screen === 'home' && <Home go={setScreen} />}
           {screen === 'lottery' && <Lottery />}
-          {screen === 'sell' && <Sell />}
+          {screen === 'sell' && canEdit && <Sell />}
           {screen === 'products' && <Products />}
           {screen === 'clients' && <Clients />}
           {screen === 'sales' && <SalesHistory />}
-          {screen === 'reports' && isOwner && <Reports />}
+          {screen === 'reports' && seesMoney && <Reports />}
           {screen === 'settings' && <SettingsScreen />}
         </Suspense>
       </main>
