@@ -2,16 +2,16 @@
    zoom al escribir), de pie o acostado, con modo oscuro y respetando las esquinas redondeadas de la pantalla. */
 
 :root {
-  --bg: #f4f6f5;
+  --bg: #f5f4f8;
   --surface: #ffffff;
-  --surface-2: #eef2f1;
-  --border: #dbe2e0;
-  --text: #17201e;
-  --text-2: #43514e;
-  --muted: #66736f;
-  --accent: #0f766e;
+  --surface-2: #f0edf5;
+  --border: #dfdae7;
+  --text: #1d1a24;
+  --text-2: #4a4556;
+  --muted: #6e6879;
+  --accent: #6d28d9;
   --accent-ink: #ffffff;
-  --accent-soft: #d6eeeb;
+  --accent-soft: #ece4fc;
   --good: #15803d;
   --good-soft: #dcf3e3;
   --bad: #b42318;
@@ -26,16 +26,16 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e1413;
-    --surface: #161f1e;
-    --surface-2: #1e2928;
-    --border: #2c3a38;
-    --text: #e7eeec;
-    --text-2: #bccac7;
-    --muted: #8d9c99;
-    --accent: #2cc4b0;
-    --accent-ink: #052421;
-    --accent-soft: #143b37;
+    --bg: #121017;
+    --surface: #1b1822;
+    --surface-2: #25212d;
+    --border: #36303f;
+    --text: #ece9f2;
+    --text-2: #c7c1d1;
+    --muted: #9b94a7;
+    --accent: #b49afc;
+    --accent-ink: #1d0d45;
+    --accent-soft: #2b2145;
     --good: #5bd98a;
     --good-soft: #163626;
     --bad: #ff8a7a;
@@ -854,7 +854,7 @@ button.chip {
   align-self: center;
   padding: 9px 16px;
   border-radius: 999px;
-  background: #17201e;
+  background: #1d1a24;
   color: #fff;
   font-size: 15px;
   font-weight: 600;
