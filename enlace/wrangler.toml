@@ -5,4 +5,5 @@ compatibility_date = "2026-10-01"
 workers_dev = true
 
 [vars]
+DB_URL = "https://zkt9dfbzm.dexie.cloud"
 ALLOWED_ORIGINS = "https://jean-carlos-declama.github.io,http://localhost:4173,http://localhost:5173"

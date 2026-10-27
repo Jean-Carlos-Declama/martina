@@ -13,6 +13,7 @@ import { Icon } from '../icons';
 import { Field, Modal } from '../kit';
 import { shareOrDownload } from '../share';
 import { DevicesSection } from './Devices';
+import { isLinked } from '../../db/cloud';
 
 export default function Settings() {
   const { isOwner, settings } = useSession();
@@ -395,8 +396,9 @@ function BackupSection() {
     <section className="card">
       <h2>Respaldo</h2>
       <p className="muted">
-        Todo se guarda solo en este iPad. Si se pierde, se daña o se borra el ícono de la app, se pierde todo, menos lo que esté en un respaldo. Guarda uno cada
-        semana en Archivos (iCloud) o mándatelo por WhatsApp.
+        {isLinked()
+          ? 'Este equipo está vinculado: todo queda guardado también en la nube. Un respaldo en archivo es una copia extra de este momento (por si acaso); recuperarlo reemplaza lo de TODOS los equipos.'
+          : 'Todo se guarda solo en este iPad. Si se pierde, se daña o se borra el ícono de la app, se pierde todo, menos lo que esté en un respaldo. Guarda uno cada semana en Archivos (iCloud) o mándatelo por WhatsApp.'}
       </p>
       <p>
         Último respaldo: <strong>{settings.lastBackupAt ? formatDateTime(settings.lastBackupAt) : 'nunca'}</strong>

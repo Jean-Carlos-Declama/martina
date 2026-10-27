@@ -16,10 +16,44 @@ Una app para el iPad de Martina con dos partes:
 
 ## 2. Dónde viven los datos
 
-- **En el iPad, en IndexedDB** (con la librería Dexie). No hay servidor ni nube: nada sale del iPad.
+- **En cada equipo, en IndexedDB** (con la librería Dexie). Si el equipo está vinculado, también en la nube (ver la sección 2b).
 - Al arrancar se llama `navigator.storage.persist()`. Además, Safari no le aplica el borrado de 7 días a las apps agregadas a la pantalla de inicio.
-- 🔴 **Si se borra el ícono de la app, se borran los datos.** Por eso existe el **respaldo**: un archivo JSON con todo, fotos incluidas, que se guarda en Archivos o iCloud o se manda por WhatsApp, y se recupera desde Ajustes. La pantalla de inicio avisa si pasó más de una semana sin respaldo.
-- **Cambios de tablas:** si en el futuro cambian, se agrega `this.version(2)` en `src/db/database.ts`. Una versión ya publicada nunca se modifica.
+- 🔴 **Sin vincular, si se borra el ícono de la app, se borran los datos.** Por eso existe el **respaldo**: un archivo JSON con todo, fotos incluidas, que se guarda en Archivos o iCloud o se manda por WhatsApp, y se recupera desde Ajustes. Mientras el equipo no esté vinculado, la pantalla de inicio avisa si pasó más de una semana sin respaldo.
+- **Cambios de tablas:** se agrega una versión nueva en `src/db/database.ts` (hoy va la 2). Una versión ya publicada nunca se modifica, y con tablas sincronizadas **no se usa `upgrade()`**.
+- **La base no tiene índices únicos.** Con varios equipos, dos podrían crear lo mismo sin internet, y la copia que llega del otro no entraría. Lo que no se puede repetir (código interno, código de barras) lo revisa el dominio al crear o editar.
+
+## 2b. Sincronización entre equipos (Dexie Cloud + enlace con QR)
+
+- **Para qué:** Martina en el iPad y en el teléfono, un empleado en otro equipo y el dueño mirando desde el suyo. Todos ven y anotan lo mismo. Funciona sin internet y sube los cambios cuando vuelve la conexión. Además, la nube sirve de copia.
+- **Servicio:** [Dexie Cloud](https://dexie.org/cloud/), base `https://zkt9dfbzm.dexie.cloud`, plan gratis.
+  - El plan gratis tiene 3 usuarios de producción y 100 MB.
+  - **Todo el negocio cuenta como UN solo usuario** (`negocio-martina`): cada equipo vinculado entra como él.
+  - Quién es la dueña, el empleado o «solo mirar» lo decide el **PIN** dentro de la app.
+- **Usuario de evaluación:** Dexie Cloud trata al usuario nuevo como de evaluación durante 14 días. 🔴 Hay que pasarlo a producción en `manager.dexie.cloud`, en Users, y marcar `negocio-martina` como producción. Es gratis dentro de los 3 del plan.
+- **Vincular con QR:**
+  - El QR lleva la **llave del negocio**.
+  - El equipo nuevo se la manda al **enlace**, un Cloudflare Worker en `enlace/` (`https://martina-enlace.martina-rd.workers.dev`).
+  - El enlace la compara y, si coincide, le pide a Dexie Cloud un permiso (`client_credentials`, `sub = negocio-martina`).
+  - La clave de Dexie Cloud y la llave del negocio viven **solo** como secretos de Cloudflare. El código es público.
+  - El enlace tiene sus propias pruebas en `enlace/enlace.test.js`.
+- **iPhone/iPad:** la app agregada a la pantalla de inicio guarda sus datos **aparte de Safari**. Por eso el QR se escanea **desde dentro de la app**. Si se escanea con la cámara normal, Safari abre una página que explica cómo hacerlo.
+- **Equipo principal y equipos nuevos:**
+  - El equipo principal se activa una sola vez con el QR de activación (`enlace/.activacion-qr.png`, solo en la PC del dueño) y **sube** lo que tenía.
+  - Cualquier otro equipo que se vincule **borra** primero lo suyo, para no mezclar datos de prueba, y baja lo del negocio.
+  - La primera vez, los datos de la base vieja «martina» (antes de sincronizar) se copian solos a la base nueva.
+- **Para que dos equipos no se pisen:**
+  - La existencia y lo que debe cada cliente se cambian con `add()` («súmale / réstale»), no con «ponle X».
+  - Cada equipo numera sus recibos con su letra (#A-12, #B-3), guardada en la tabla `local`, que no se sincroniza.
+  - Una transacción se aplica completa o no se aplica.
+- **Quitar un equipo:** la dueña lo marca como quitado. Cuando ese equipo se conecta, borra todo y se desvincula.
+- **Cambiar la llave:** `enlace\publicar.ps1 -NuevaLlave`. Los QR viejos dejan de servir; los equipos ya vinculados siguen funcionando.
+- **Mientras `src/config.ts` esté vacío**, la app vuelve a guardar solo en el equipo, como al principio.
+- **Probado:** con dos navegadores contra la nube real:
+  1. El equipo principal subió lo que tenía.
+  2. El segundo equipo se vinculó y entró con el mismo PIN.
+  3. El segundo vio la jugada anotada en el primero y vendió (recibo #B-1).
+  4. El primero vio bajar la existencia.
+  5. Después se borró todo lo de la prueba de la nube.
 
 ## 3. Dinero y cantidades
 
@@ -65,6 +99,8 @@ Una app para el iPad de Martina con dos partes:
   - Puede vender, anotar lotería y cobrar fiado.
   - No ve costos, ganancias ni reportes.
   - Para anular, devolver, cerrar el día o mover inventario necesita que la dueña ponga su PIN.
+- **Solo mirar:** ve todo, también costos, ganancias y reportes, pero no puede anotar ni cambiar nada. Es para el dueño que revisa desde su teléfono. Lo controla la pantalla, no la nube.
+- **El PIN de la bienvenida** se crea con el teclado de números de la app, no con campos de contraseña: el iPhone/iPad los llenaba solo con una «contraseña segura».
 - **Bloqueo:** la app se bloquea sola tras unos minutos sin usarla (se ajusta). Después de 5 intentos fallidos espera 30 segundos.
 - **Bitácora:** guarda quién hizo cada cosa (anulaciones, cierres, ajustes, cambios de precio y costo, conteos).
 - **Límite:** esto separa a la dueña del empleado. **No es cifrado:** quien tenga el iPad y sepa usar herramientas de programador podría leer los datos.

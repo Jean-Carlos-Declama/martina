@@ -3,7 +3,7 @@
 // (Cloudflare), nunca aquí, porque este código es público.
 export const CLOUD = {
   /** La base en Dexie Cloud (sale de `npx dexie-cloud create`, archivo dexie-cloud.json). */
-  databaseUrl: '',
+  databaseUrl: 'https://zkt9dfbzm.dexie.cloud',
   /** El enlace en Cloudflare que da permiso a un equipo cuando escanea el QR (carpeta enlace/). */
-  linkUrl: '',
+  linkUrl: 'https://martina-enlace.martina-rd.workers.dev/token',
 };
