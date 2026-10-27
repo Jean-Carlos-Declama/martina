@@ -1,0 +1,325 @@
+import { describe, expect, it } from 'vitest';
+import { getSettings, saveSettings, type MartinaDb } from '../db/database';
+import { addProduct, newWorld } from '../test/helpers';
+import { exportBackup, importBackup } from './backup';
+import { createClient } from './clients';
+import { BusinessError, dayKeyOf, newId } from './common';
+import { registerPayment } from './credit';
+import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, voidLotterySale, voidPrize } from './lottery';
+import { createProduct, updateProduct } from './products';
+import { salesReport, stockAlerts } from './reports';
+import { createSale, returnItems, voidSale } from './sales';
+import { countCorrection, manualMovement } from './stock';
+import { ownerByPin, verifyPin } from './users';
+
+const today = () => dayKeyOf();
+
+async function newClient(db: MartinaDb, name: string, creditLimitCents?: number) {
+  const id = newId();
+  await db.clients.add({ id, name, balanceCents: 0, creditLimitCents, active: true, createdAt: new Date().toISOString() });
+  return id;
+}
+
+describe('productos e inventario', () => {
+  it('la existencia inicial entra como movimiento y queda en el historial', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 12);
+    expect(p.stock).toBe(12);
+    expect(p.sku).toBe('P0001');
+    const moves = await w.db.movements.where('productId').equals(p.id).toArray();
+    expect(moves).toHaveLength(1);
+    expect(moves[0]).toMatchObject({ type: 'initial', quantity: 12, stockAfter: 12 });
+  });
+
+  it('no deja repetir el código interno ni el de barras', async () => {
+    const w = await newWorld();
+    await addProduct(w, { sku: 'A1', barcode: '7460001' });
+    await expect(addProduct(w, { sku: 'A1', name: 'Otro' })).rejects.toThrow(BusinessError);
+    await expect(addProduct(w, { barcode: '7460001', name: 'Otro' })).rejects.toThrow(/código de barras/);
+  });
+
+  it('editar el producto no cambia la existencia', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 5);
+    await updateProduct(w.db, p.id, { name: 'Refresco grande', unit: 'unidad', costCents: 3500, priceCents: 6000, taxed: false, minStock: 1 }, w.owner.id);
+    const after = await w.db.products.get(p.id);
+    expect(after).toMatchObject({ name: 'Refresco grande', priceCents: 6000, stock: 5 });
+  });
+
+  it('el conteo físico anota solo la diferencia', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const move = await countCorrection(w.db, p.id, 7, w.owner.id);
+    expect(move).toMatchObject({ type: 'count', quantity: -3, stockAfter: 7 });
+    expect(await countCorrection(w.db, p.id, 7, w.owner.id)).toBeNull();
+  });
+
+  it('entrada de mercancía con otro costo deja el costo promedio; las salidas piden motivo', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, { costCents: 3000 }, 10);
+    await manualMovement(w.db, { productId: p.id, type: 'purchase', quantity: 10, unitCostCents: 4000, userId: w.owner.id });
+    expect(await w.db.products.get(p.id)).toMatchObject({ stock: 20, costCents: 3500 });
+    await expect(manualMovement(w.db, { productId: p.id, type: 'damaged', quantity: 2, userId: w.owner.id })).rejects.toThrow(/motivo/);
+    await manualMovement(w.db, { productId: p.id, type: 'damaged', quantity: 2, reason: 'vencidos', userId: w.owner.id });
+    await expect(manualMovement(w.db, { productId: p.id, type: 'internalUse', quantity: 50, reason: 'casa', userId: w.owner.id })).rejects.toThrow(
+      /No hay suficiente/,
+    );
+    expect((await w.db.products.get(p.id))!.stock).toBe(18);
+  });
+
+  it('las cantidades con decimales no acumulan errores', async () => {
+    const w = await newWorld();
+    const p = await createProduct(w.db, { name: 'Arroz', unit: 'libra', costCents: 3000, priceCents: 4000, taxed: false, minStock: 0 }, 1, w.owner.id);
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 0.1 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 0.2 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    expect((await w.db.products.get(p.id))!.stock).toBe(0.7);
+  });
+});
+
+describe('ventas de la tienda', () => {
+  it('cobrar descuenta el inventario y numera el recibo', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const s1 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 3 }], payment: 'cash', requestId: newId(), userId: w.employee.id });
+    const s2 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'cash', requestId: newId(), userId: w.employee.id });
+    expect(s1.totalCents).toBe(15000);
+    expect([s1.number, s2.number]).toEqual([1, 2]);
+    expect((await w.db.products.get(p.id))!.stock).toBe(6);
+  });
+
+  it('el doble toque (misma llave) no cobra ni descuenta dos veces', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const input = { lines: [{ productId: p.id, quantity: 2 }], payment: 'cash' as const, requestId: newId(), userId: w.owner.id };
+    const [a, b] = await Promise.all([createSale(w.db, input), createSale(w.db, input)]);
+    expect(a.id).toBe(b.id);
+    expect(await w.db.sales.count()).toBe(1);
+    expect((await w.db.products.get(p.id))!.stock).toBe(8);
+  });
+
+  it('si no alcanza la existencia no se hace nada de la venta', async () => {
+    const w = await newWorld();
+    const a = await addProduct(w, { name: 'Pan' }, 10);
+    const b = await addProduct(w, { name: 'Leche' }, 1);
+    await expect(
+      createSale(w.db, { lines: [{ productId: a.id, quantity: 2 }, { productId: b.id, quantity: 5 }], payment: 'cash', requestId: newId(), userId: w.owner.id }),
+    ).rejects.toThrow(/No hay suficiente "Leche"/);
+    expect((await w.db.products.get(a.id))!.stock).toBe(10);
+    expect(await w.db.sales.count()).toBe(0);
+    expect((await getSettings(w.db)).nextSaleNumber).toBe(1);
+  });
+
+  it('descuentos y el ITBIS incluido en el precio', async () => {
+    const w = await newWorld();
+    await saveSettings({ ...(await getSettings(w.db)), taxEnabled: true, taxRate: 18 }, w.db);
+    const p = await addProduct(w, { priceCents: 11800, taxed: true }, 10);
+    const sale = await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'card', requestId: newId(), userId: w.owner.id });
+    expect(sale.totalCents).toBe(11800);
+    expect(sale.taxCents).toBe(1800);
+    const withDiscount = await createSale(w.db, {
+      lines: [{ productId: p.id, quantity: 2, discountCents: 3600 }],
+      discountCents: 10000,
+      payment: 'cash',
+      requestId: newId(),
+      userId: w.owner.id,
+    });
+    expect(withDiscount.subtotalCents).toBe(20000);
+    expect(withDiscount.totalCents).toBe(10000);
+    await expect(
+      createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], discountCents: 20000, payment: 'cash', requestId: newId(), userId: w.owner.id }),
+    ).rejects.toThrow(/mayor que la venta/);
+  });
+
+  it('solo la dueña anula; la mercancía vuelve y el recibo queda marcado', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const sale = await createSale(w.db, { lines: [{ productId: p.id, quantity: 4 }], payment: 'cash', requestId: newId(), userId: w.employee.id });
+    await expect(voidSale(w.db, sale.id, w.employee.id, 'error')).rejects.toThrow(/Solo la dueña/);
+    const voided = await voidSale(w.db, sale.id, w.owner.id, 'se equivocó');
+    expect(voided.status).toBe('void');
+    expect((await w.db.products.get(p.id))!.stock).toBe(10);
+    // Anular otra vez no devuelve la mercancía dos veces.
+    await voidSale(w.db, sale.id, w.owner.id, 'otra vez');
+    expect((await w.db.products.get(p.id))!.stock).toBe(10);
+    expect((await w.db.audit.where('entity').equals('venta').toArray()).some(a => a.action === 'anular')).toBe(true);
+  });
+
+  it('devolución parcial: no se puede devolver más de lo vendido y resta de la venta', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const sale = await createSale(w.db, { lines: [{ productId: p.id, quantity: 3 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    await returnItems(w.db, sale.id, [{ productId: p.id, quantity: 2 }], w.owner.id, 'vino dañado');
+    expect((await w.db.products.get(p.id))!.stock).toBe(9);
+    await expect(returnItems(w.db, sale.id, [{ productId: p.id, quantity: 2 }], w.owner.id, 'otra')).rejects.toThrow(/más/);
+    expect((await salesReport(w.db, today(), today())).salesCents).toBe(5000);
+  });
+});
+
+describe('fiado', () => {
+  it('fiar sube la deuda, abonar la baja, y no se abona más de lo que debe', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const ana = await newClient(w.db, 'Ana');
+    await expect(createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'credit', requestId: newId(), userId: w.owner.id })).rejects.toThrow(
+      /escoger el cliente/,
+    );
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(10000);
+    await registerPayment(w.db, ana, 4000, w.owner.id);
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(6000);
+    await expect(registerPayment(w.db, ana, 7000, w.owner.id)).rejects.toThrow(/solo debe/);
+  });
+
+  it('respeta el límite de fiado', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const luis = await newClient(w.db, 'Luis', 8000);
+    await expect(
+      createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: luis, requestId: newId(), userId: w.owner.id }),
+    ).rejects.toThrow(/límite/);
+    expect((await w.db.products.get(p.id))!.stock).toBe(10);
+  });
+
+  it('anular o devolver una venta fiada le baja la deuda', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const ana = await newClient(w.db, 'Ana');
+    const s1 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    const s2 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    await voidSale(w.db, s1.id, w.owner.id, 'error');
+    await returnItems(w.db, s2.id, [{ productId: p.id, quantity: 1 }], w.owner.id, 'devolvió uno');
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(5000);
+  });
+
+  it('no deja dos clientes con el mismo nombre (aunque cambien mayúsculas o acentos)', async () => {
+    const w = await newWorld();
+    await createClient(w.db, { name: 'José Pérez', phone: '809-555-1234' }, w.owner.id);
+    await expect(createClient(w.db, { name: 'jose perez' }, w.owner.id)).rejects.toThrow(/Ya hay un cliente/);
+    expect((await w.db.clients.toArray())[0].phone).toBe('8095551234');
+  });
+});
+
+describe('lotería (el cuadre del día)', () => {
+  const play = (w: Awaited<ReturnType<typeof newWorld>>, amountCents: number, clientName: string, extra: { clientId?: string; credit?: boolean } = {}) =>
+    addLotterySale(w.db, { amountCents, clientName, ...extra, userId: w.employee.id, requestId: newId() });
+  const prize = (w: Awaited<ReturnType<typeof newWorld>>, amountCents: number, clientName: string) =>
+    addPrize(w.db, { amountCents, clientName, userId: w.employee.id, requestId: newId() });
+
+  it('como la libreta: clientes, veces que jugaron y cobraron, venta, comisión, premios y lo que se entrega', async () => {
+    const w = await newWorld();
+    await saveSettings({ ...(await getSettings(w.db)), commissionPct: 10 }, w.db);
+    await play(w, 40000, 'Ana');
+    await play(w, 30000, 'Pedro');
+    await play(w, 30000, 'pedro ');
+    await prize(w, 15000, 'Ana');
+    await prize(w, 5000, 'Ana');
+    const wrong = await prize(w, 99900, 'Pedro');
+    await voidPrize(w.db, wrong.id, w.owner.id, 'mal anotado');
+
+    const day = await computeDay(w.db, today());
+    expect(day.totals).toEqual({
+      salesCount: 3,
+      salesCents: 100000, // RD$ 1,000
+      commissionPct: 10,
+      commissionCents: 10000, // RD$ 100 (lo que gana ella)
+      prizesCount: 2,
+      prizesCents: 20000, // RD$ 200
+      deliverCents: 70000, // 1,000 - 100 - 200 = RD$ 700
+    });
+    expect(day.clients).toEqual([
+      { name: 'Ana', purchases: 1, purchasesCents: 40000, prizes: 2, prizesCents: 20000 },
+      { name: 'Pedro', purchases: 2, purchasesCents: 60000, prizes: 0, prizesCents: 0 },
+    ]);
+  });
+
+  it('el doble toque no anota la jugada dos veces', async () => {
+    const w = await newWorld();
+    const input = { amountCents: 5000, clientName: 'Ana', userId: w.owner.id, requestId: newId() };
+    await Promise.all([addLotterySale(w.db, input), addLotterySale(w.db, input)]);
+    expect(await w.db.lottery.count()).toBe(1);
+  });
+
+  it('lotería fiada va a la cuenta del cliente, y al anularla se quita', async () => {
+    const w = await newWorld();
+    const ana = await newClient(w.db, 'Ana');
+    await expect(play(w, 5000, 'Luis', { credit: true })).rejects.toThrow(/escoger el cliente/);
+    const entry = await play(w, 5000, '', { clientId: ana, credit: true });
+    expect(entry.clientName).toBe('Ana');
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(5000);
+    expect((await computeDay(w.db, today())).creditCents).toBe(5000);
+    await voidLotterySale(w.db, entry.id, w.owner.id, 'se arrepintió');
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(0);
+    expect((await computeDay(w.db, today())).totals.salesCents).toBe(0);
+  });
+
+  it('al cerrar el día no se anota ni se paga premio; la dueña lo puede reabrir; la tienda sigue vendiendo', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    await play(w, 5000, 'Ana');
+    await expect(closeDay(w.db, today(), w.employee.id)).rejects.toThrow(/Solo la dueña/);
+    const closed = await closeDay(w.db, today(), w.owner.id);
+    expect(closed.totals?.salesCents).toBe(5000);
+    await expect(play(w, 5000, 'Ana')).rejects.toThrow(/ya se cerró/);
+    await expect(prize(w, 100, 'Ana')).rejects.toThrow(/ya se cerró/);
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    await reopenDay(w.db, today(), w.owner.id, 'faltó una jugada');
+    await play(w, 5000, 'Ana');
+    expect((await computeDay(w.db, today())).totals.salesCents).toBe(10000);
+  });
+
+  it('el reporte de varios días usa la comisión de cada día', async () => {
+    const w = await newWorld();
+    await play(w, 100000, 'Ana');
+    await prize(w, 20000, 'Ana');
+    const report = await lotteryReport(w.db, '2000-01-01', today());
+    expect(report.totals).toMatchObject({ salesCents: 100000, commissionCents: 10000, prizesCents: 20000, deliverCents: 70000 });
+    expect(report.days).toHaveLength(1);
+  });
+});
+
+describe('usuarios, reportes y respaldo', () => {
+  it('el PIN no se guarda tal cual y se comprueba bien', async () => {
+    const w = await newWorld();
+    expect(w.owner.pinHash).not.toContain('1234');
+    expect(await verifyPin(w.owner, '1234')).toBe(true);
+    expect(await verifyPin(w.owner, '4321')).toBe(false);
+    expect((await ownerByPin(w.db, '1234'))?.id).toBe(w.owner.id);
+    expect(await ownerByPin(w.db, '5678')).toBeUndefined();
+  });
+
+  it('reporte del período y alertas de existencia', async () => {
+    const w = await newWorld();
+    const pan = await addProduct(w, { name: 'Pan', costCents: 500, priceCents: 1000, minStock: 5 }, 6);
+    await addProduct(w, { name: 'Leche', minStock: 1 }, 0);
+    await addProduct(w, { name: 'Arroz', minStock: 2 }, 50);
+    const sale = await createSale(w.db, { lines: [{ productId: pan.id, quantity: 4 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    await returnItems(w.db, sale.id, [{ productId: pan.id, quantity: 1 }], w.owner.id, 'devolvió');
+    const report = await salesReport(w.db, today(), today());
+    expect(report).toMatchObject({ salesCount: 1, salesCents: 3000, costCents: 1500, profitCents: 1500 });
+    expect(report.top[0]).toMatchObject({ name: 'Pan', quantity: 3 });
+    const alerts = await stockAlerts(w.db);
+    expect(alerts.out.map(p => p.name)).toEqual(['Leche']);
+    expect(alerts.low.map(p => p.name)).toEqual(['Pan']);
+  });
+
+  it('el respaldo guarda todo (con fotos y lotería) y se recupera igual', async () => {
+    const w = await newWorld();
+    const photo = new Blob([new Uint8Array([1, 2, 3, 250])], { type: 'image/jpeg' });
+    const p = await addProduct(w, { photo }, 8);
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    await addLotterySale(w.db, { amountCents: 5000, clientName: 'Ana', userId: w.owner.id, requestId: newId() });
+    const file = await exportBackup(w.db);
+
+    const other = await newWorld();
+    await expect(importBackup(other.db, '{"hola":1}')).rejects.toThrow(/no es un respaldo/);
+    const result = await importBackup(other.db, file);
+    expect(result).toEqual({ products: 1, sales: 1 });
+    const restored = await other.db.products.get(p.id);
+    expect(restored?.stock).toBe(6);
+    expect(restored?.photo).toBeInstanceOf(Blob);
+    expect([...new Uint8Array(await restored!.photo!.arrayBuffer())]).toEqual([1, 2, 3, 250]);
+    expect(await other.db.users.count()).toBe(2);
+    expect(await other.db.lottery.count()).toBe(1);
+    expect(await verifyPin((await other.db.users.get(w.owner.id))!, '1234')).toBe(true);
+  });
+});
