@@ -1207,3 +1207,9 @@ button.chip {
     grid-template-columns: 96px 1fr 96px;
   }
 }
+
+/* PIN en campos de texto con puntitos (no "password": el iPhone/iPad no trata de llenarlos solo). */
+.pin-field {
+  -webkit-text-security: disc;
+  letter-spacing: 0.2em;
+}

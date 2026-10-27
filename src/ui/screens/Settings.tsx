@@ -221,11 +221,11 @@ function ChangePinModal({ onClose }: { onClose: () => void }) {
         </button>
       }
     >
-      <Field label="PIN actual">{id => <input id={id} type="password" inputMode="numeric" value={current} onChange={numeric(setCurrent)} autoFocus />}</Field>
+      <Field label="PIN actual">{id => <input id={id} className="pin-field" inputMode="numeric" autoComplete="off" value={current} onChange={numeric(setCurrent)} autoFocus />}</Field>
       <div className="row2">
-        <Field label="PIN nuevo">{id => <input id={id} type="password" inputMode="numeric" value={next} onChange={numeric(setNext)} />}</Field>
+        <Field label="PIN nuevo">{id => <input id={id} className="pin-field" inputMode="numeric" autoComplete="off" value={next} onChange={numeric(setNext)} />}</Field>
         <Field label="Repite el nuevo" hint={again && next !== again ? 'No son iguales' : undefined}>
-          {id => <input id={id} type="password" inputMode="numeric" value={again} onChange={numeric(setAgain)} />}
+          {id => <input id={id} className="pin-field" inputMode="numeric" autoComplete="off" value={again} onChange={numeric(setAgain)} />}
         </Field>
       </div>
     </Modal>
@@ -265,7 +265,7 @@ function AddUserModal({ onClose }: { onClose: () => void }) {
           )}
         </Field>
         <Field label="Su PIN (4 a 6 números)">
-          {id => <input id={id} type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} />}
+          {id => <input id={id} className="pin-field" inputMode="numeric" autoComplete="off" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} />}
         </Field>
       </div>
       <p className="hint">El empleado no ve costos ni ganancias, y para anular, devolver, cerrar el día o mover inventario necesita el PIN de la dueña.</p>
