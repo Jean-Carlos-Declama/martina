@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Manual de Martina</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  :root { --accent: #6d28d9; --soft: #f1eafd; --ink: #1d1a24; --muted: #5d5869; --good: #15803d; --bad: #b42318; --warn: #a15c07; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Segoe UI', -apple-system, Roboto, sans-serif; color: var(--ink); font-size: 11.5pt; line-height: 1.5; }
+  h1 { font-size: 22pt; color: var(--accent); margin: 0 0 6mm; break-after: avoid; }
+  h2 { font-size: 15pt; color: var(--accent); margin: 7mm 0 2mm; break-after: avoid; }
+  h3 { font-size: 12.5pt; margin: 5mm 0 1.5mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; }
+  ol, ul { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1mm; }
+  .chapter { padding-top: 6mm; }
+  .cover { break-after: page; }
+  h1 { break-after: avoid; }
+  h1 + p, h2 + p, h3 + p, h3 + ol, h3 + ul { break-before: avoid; }
+  figure { margin: 3mm 0 5mm; break-inside: avoid; }
+  figure img { width: 90%; margin: 0 auto; border: 1px solid #ddd6e8; border-radius: 3mm; display: block; }
+  figure.half img { width: 62%; margin: 0 auto; }
+  figure.narrow img { width: 32%; margin: 0 auto; }
+  figcaption { font-size: 9.5pt; color: var(--muted); text-align: center; margin-top: 1.5mm; }
+  .tip, .warn, .key { border-radius: 3mm; padding: 3mm 4mm; margin: 3mm 0 4mm; break-inside: avoid; }
+  .tip { background: var(--soft); }
+  .warn { background: #fdf0d5; }
+  .key { background: #e8f5ec; }
+  .tip b:first-child, .warn b:first-child, .key b:first-child { display: block; margin-bottom: 1mm; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 10.5pt; break-inside: avoid; }
+  th, td { border-bottom: 1px solid #e4dfee; padding: 1.8mm 2mm; text-align: left; vertical-align: top; }
+  th { background: var(--soft); }
+  td.c, th.c { text-align: center; }
+  .yes { color: var(--good); font-weight: 700; }
+  .no { color: var(--bad); font-weight: 700; }
+  .pin { color: var(--warn); font-weight: 700; }
+  .btn { display: inline-block; padding: 0 2mm; border-radius: 1.5mm; background: var(--soft); color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+  .cover img { width: 42mm; border-radius: 9mm; margin-bottom: 8mm; }
+  .cover h1 { font-size: 34pt; margin-bottom: 3mm; }
+  .cover .sub { font-size: 14pt; color: var(--muted); }
+  .cover .url { margin-top: 14mm; font-size: 11pt; color: var(--muted); }
+  .toc { columns: 2; column-gap: 10mm; font-size: 11pt; }
+  .toc li { break-inside: avoid; }
+  .example td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .example tr.total td { font-weight: 700; border-top: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <img src="icono.png" alt="" />
+  <h1>Manual de Martina</h1>
+  <p class="sub">Tienda, inventario y lotería en tu iPad</p>
+  <p class="sub">Todo lo que hace cada pantalla y cómo usarla</p>
+  <p class="url">jean-carlos-declama.github.io/martina</p>
+</section>
+
+<section class="chapter">
+  <h1>Contenido</h1>
+  <ol class="toc">
+    <li>Instalar la app en el iPad</li>
+    <li>La primera vez</li>
+    <li>Entrar con tu PIN</li>
+    <li>Inicio</li>
+    <li>Lotería: anotar jugadas y premios</li>
+    <li>Lotería: el cuadre y cerrar el día</li>
+    <li>Vender en la tienda</li>
+    <li>Productos e inventario</li>
+    <li>Clientes y fiado</li>
+    <li>Ventas: recibos, anular y devolver</li>
+    <li>Reportes</li>
+    <li>Varios equipos: vincular con el QR</li>
+    <li>Ajustes</li>
+    <li>Quién puede hacer qué</li>
+    <li>Cuidados importantes y preguntas</li>
+  </ol>
+
+  <h2>¿Qué es Martina?</h2>
+  <p>Martina es tu libreta en el iPad, en dos partes:</p>
+  <ul>
+    <li><b>La tienda:</b> lo que vendes en el colmado. Lleva la mercancía que hay, lo que vendes, lo que fías y lo que ganas.</li>
+    <li><b>La lotería:</b> igual que en tu libreta. Anotas quién jugó y cuánto, los premios que pagas, tu comisión del día y lo que tienes que entregar.</li>
+  </ul>
+  <p>Todo se calcula solo: no tienes que sumar a mano.</p>
+
+  <h2>1. Instalar la app en el iPad</h2>
+  <ol>
+    <li>Abre <b>Safari</b> (tiene que ser Safari) y entra a <b>jean-carlos-declama.github.io/martina</b>.</li>
+    <li>Toca el botón <b>Compartir</b> (el cuadrito con la flecha hacia arriba).</li>
+    <li>Toca <b>Agregar a pantalla de inicio</b> y luego <b>Agregar</b>.</li>
+    <li>Desde ahora ábrela <b>siempre desde el ícono morado «Martina»</b>, no desde Safari.</li>
+  </ol>
+  <div class="tip"><b>Funciona sin internet</b>Solo necesitas internet para mandar cosas por WhatsApp, para recibir las actualizaciones y para que se pasen los datos a los otros equipos.</div>
+  <div class="tip"><b>Cuando haya algo nuevo</b>Abajo sale «Hay una versión nueva de Martina». Toca <span class="btn">Actualizar ahora</span> cuando no estés a mitad de una venta. No se pierde nada.</div>
+</section>
+
+<section class="chapter">
+  <h1>2. La primera vez</h1>
+  <p>La primera vez que abres la app sale la bienvenida. Se hace una sola vez:</p>
+  <ol>
+    <li>Escribe el nombre del negocio, tu nombre y tu <b>comisión de la lotería</b> (el % que te ganas de lo que vendes de lotería en el día). Se puede cambiar después.</li>
+    <li>Toca <span class="btn">Siguiente: crear mi PIN</span>.</li>
+    <li>Escoge un <b>PIN</b> de 4 a 6 números, tócalo en el teclado y toca ✓. Luego ponlo otra vez para confirmar.</li>
+  </ol>
+  <figure class="half"><img src="m01-bienvenida.png" /><figcaption>La bienvenida.</figcaption></figure>
+  <figure class="half"><img src="m02-crear-pin.png" /><figcaption>Crear el PIN con el teclado de la app.</figcaption></figure>
+  <div class="warn"><b>Apréndete el PIN</b>Es la clave para entrar a la app y no se puede ver ni recuperar. Si se te olvida, avísale a Jean Carlos.</div>
+  <div class="tip"><b>¿Ya tienes Martina en otro equipo?</b>Entonces no la prepares de nuevo. En la bienvenida toca <span class="btn">Ya uso Martina en otro equipo: escanear su QR</span> (ver el capítulo 12).</div>
+
+  <h2>3. Entrar con tu PIN</h2>
+  <p>Cada vez que abres la app, te pide el PIN. Si hay varias personas, primero tocas tu nombre.</p>
+  <figure class="half"><img src="m03-pin.png" /><figcaption>Pon tu PIN y toca ✓.</figcaption></figure>
+  <ul>
+    <li>Si nadie la toca en <b>10 minutos</b>, se bloquea sola, para que un cliente no vea ni toque nada. Ese tiempo se cambia en Ajustes.</li>
+    <li>Para bloquearla tú misma, toca <span class="btn">Bloquear</span> en el menú.</li>
+    <li>Si alguien pone un PIN equivocado 5 veces, la app espera 30 segundos.</li>
+  </ul>
+</section>
+
+<section class="chapter">
+  <h1>4. Inicio</h1>
+  <p>Es el resumen de tu día:</p>
+  <ul>
+    <li><b>Lotería de hoy:</b> venta, tu comisión, premios pagados y <b>lo que tienes que entregar</b>.</li>
+    <li><b>Tienda hoy:</b> lo vendido, la ganancia y lo que te deben de fiado.</li>
+    <li><b>Hay que reponer:</b> productos agotados (rojo) o con poca existencia (amarillo).</li>
+  </ul>
+  <p>Los botones <span class="btn">Anotar lotería</span> y <span class="btn">Vender</span> te llevan directo.</p>
+  <figure><img src="m04-inicio.png" /><figcaption>La pantalla de inicio.</figcaption></figure>
+  <p>El menú de la izquierda (abajo si tienes el iPad de pie) lleva a cada parte de la app.</p>
+  <figure class="narrow"><img src="m26-de-pie.png" /><figcaption>Con el iPad de pie, el menú queda abajo.</figcaption></figure>
+</section>
+
+<section class="chapter">
+  <h1>5. Lotería: anotar jugadas y premios</h1>
+  <p>Es tu libreta de la lotería. Arriba ves los cuatro números del día:</p>
+  <table>
+    <tr><th>Venta</th><td>Todo lo que jugaron hoy (y cuántas jugadas).</td></tr>
+    <tr><th>Comisión</th><td>Lo que te ganas: el % de la venta del día.</td></tr>
+    <tr><th>Premios</th><td>Lo que pagaste a los que se sacaron algo.</td></tr>
+    <tr><th>A entregar</th><td><b>Venta − comisión − premios.</b> Es lo que entregas.</td></tr>
+  </table>
+
+  <h3>Anotar una jugada</h3>
+  <ol>
+    <li>En <span class="btn">Anotar jugada</span>, escribe el <b>nombre del cliente</b>. La app te sugiere los nombres que ya usaste.</li>
+    <li>Escribe <b>cuánto jugó</b>, o toca un botón rápido (25, 50, 100, 200, 500).</li>
+    <li>Si se lo fías, marca <b>Fiado</b>. Solo se puede con clientes registrados, y se le suma a su cuenta.</li>
+    <li>Toca <span class="btn">Anotar jugada</span>.</li>
+  </ol>
+  <figure><img src="m05-loteria.png" /><figcaption>Anotando una jugada.</figcaption></figure>
+
+  <h3>Pagar un premio</h3>
+  <ol>
+    <li>Toca la pestaña <span class="btn">Pagar premio</span>.</li>
+    <li>Escribe a quién y <b>cuánto se sacó</b>.</li>
+    <li>Toca <span class="btn">Pagar premio</span>. Se resta de lo que entregas.</li>
+  </ol>
+  <figure><img src="m06-loteria-premio.png" /><figcaption>Pagando un premio.</figcaption></figure>
+</section>
+
+<section class="chapter">
+  <h1>6. Lotería: el cuadre y cerrar el día</h1>
+  <p>Más abajo está <b>«Clientes del día»</b>, tu libreta: cada cliente con cuántas veces jugó, cuánto, cuántas veces cobró premio y cuánto cobró. Al final, el total.</p>
+  <p>Debajo, en <b>«Anotaciones»</b>, está cada jugada y cada premio con su hora. Si anotaste algo mal, toca el ícono de la basurita a su lado para anularlo (pide el PIN de la dueña y el porqué).</p>
+  <figure><img src="m07-loteria-tabla.png" /><figcaption>Clientes del día y anotaciones.</figcaption></figure>
+
+  <h3>Ejemplo como en la libreta</h3>
+  <table class="example">
+    <tr><td>Venta del día</td><td>RD$ 1,000.00</td></tr>
+    <tr><td>Comisión 10 % (lo que te ganas)</td><td>− RD$ 100.00</td></tr>
+    <tr><td>Premios pagados</td><td>− RD$ 200.00</td></tr>
+    <tr class="total"><td>A entregar</td><td>RD$ 700.00</td></tr>
+  </table>
+
+  <h3>Otras cosas de esta pantalla</h3>
+  <ul>
+    <li><b>Cambiar la comisión de un día:</b> toca el cuadro de la comisión. El % que pongas en Ajustes es el que usa cada día nuevo.</li>
+    <li><b>Ver otro día:</b> usa las flechas ‹ › al lado de la fecha; <span class="btn">Hoy</span> te devuelve.</li>
+    <li><b>Mandar el cuadre:</b> <span class="btn">Enviar cuadre</span> lo manda por WhatsApp (o lo que escojas) con cada cliente y los totales.</li>
+  </ul>
+
+  <h3>Cerrar el día</h3>
+  <p>Al terminar, toca <span class="btn">Cerrar el día</span>. Te muestra el resumen y, si estás de acuerdo, lo cierra. Un día cerrado <b>ya no se puede cambiar</b>: no se anota ni se anula nada en él. Si hay que corregir algo, la dueña lo puede <span class="btn">Reabrir</span> y tiene que escribir el porqué.</p>
+  <figure class="half"><img src="m08-cerrar-dia.png" /><figcaption>Confirmar el cierre del día.</figcaption></figure>
+  <div class="tip"><b>La tienda va aparte</b>Cerrar la lotería no frena las ventas de la tienda.</div>
+</section>
+
+<section class="chapter">
+  <h1>7. Vender en la tienda</h1>
+  <ol>
+    <li>En <b>Vender</b>, toca los productos para ir agregándolos a la venta (a la derecha). Cada toque suma uno.</li>
+    <li>Para buscar, escribe en <b>«Buscar o escanear producto»</b>.</li>
+    <li>Para el código de barras:
+      <ul>
+        <li>toca <span class="btn">Escanear</span> y pon el código frente a la cámara, o</li>
+        <li>si tienes un lector de códigos, solo pásale el producto.</li>
+      </ul>
+    </li>
+    <li>Usa − y + para quitar o agregar uno. Si tocas el nombre de un producto en la venta, puedes poner la <b>cantidad exacta</b> (por ejemplo 1.5 libras), un <b>descuento</b> o quitarlo.</li>
+  </ol>
+  <figure><img src="m11-vender.png" /><figcaption>Una venta con tres productos.</figcaption></figure>
+  <figure class="half"><img src="m12-cantidad.png" /><figcaption>Cantidad exacta o descuento de un producto.</figcaption></figure>
+  <div class="tip"><b>Si queda poco</b>La existencia se ve debajo de cada producto. En rojo, queda poco; claritos, están agotados.</div>
+</section>
+
+<section class="chapter">
+  <h1>7. Vender (cobrar)</h1>
+  <ol>
+    <li>Toca <span class="btn">Cobrar</span>.</li>
+    <li>Escoge cómo paga: <b>Efectivo, Transferencia, Tarjeta o Fiado</b>.</li>
+    <li>Si es efectivo, escribe cuánto te dio: la app te dice la <b>devuelta</b>.</li>
+    <li>Si quieres, escribe el cliente o un descuento a toda la venta. <b>Para fiar, el cliente tiene que estar registrado.</b></li>
+    <li>Toca <span class="btn">Cobrar</span>. La mercancía se descuenta sola del inventario.</li>
+  </ol>
+  <figure class="half"><img src="m13-cobrar.png" /><figcaption>Cobrar: forma de pago y devuelta.</figcaption></figure>
+  <p>Al final sale el <b>recibo</b>. Lo puedes mandar por <span class="btn">WhatsApp</span> (si el cliente tiene teléfono, le llega directo a él) o con <span class="btn">Compartir</span>.</p>
+  <figure class="half"><img src="m14-recibo.png" /><figcaption>El recibo de la venta.</figcaption></figure>
+  <div class="tip"><b>Tranquila con el doble toque</b>Si tocas «Cobrar» dos veces sin querer, la venta se cobra una sola vez.</div>
+</section>
+
+<section class="chapter">
+  <h1>8. Productos e inventario</h1>
+  <p>Aquí está toda tu mercancía, con su precio y cuántos quedan. Arriba puedes ver <b>Todos</b>, los de <b>Poca existencia</b>, los <b>Agotados</b> o los <b>Archivados</b>.</p>
+  <figure><img src="m09-productos.png" /><figcaption>La lista de productos.</figcaption></figure>
+  <h3>Agregar un producto</h3>
+  <ol>
+    <li>Toca <span class="btn">Nuevo producto</span>.</li>
+    <li>Ponle nombre, foto (opcional), código de barras (escribirlo o escanearlo), <b>costo</b> (lo que te cuesta) y <b>precio de venta</b>. La app te dice cuánto ganas.</li>
+    <li>Escoge cómo se vende (unidad, libra, paquete…), cuándo avisarte que queda poco y cuántos hay ahora.</li>
+    <li>Toca <span class="btn">Guardar</span>.</li>
+  </ol>
+  <figure><img src="m10-producto-nuevo.png" /><figcaption>Producto nuevo.</figcaption></figure>
+</section>
+
+<section class="chapter">
+  <h1>8. Productos: la ficha y la mercancía</h1>
+  <p>Si tocas un producto, ves su <b>ficha</b>: cuánto hay, precio, costo y el <b>historial</b>. En el historial está todo lo que entró y salió: qué pasó, cuánto, cuánto quedó y quién lo hizo.</p>
+  <figure><img src="m16-ficha-producto.png" /><figcaption>La ficha de un producto con su historial.</figcaption></figure>
+  <ul>
+    <li><span class="btn">Entrada de mercancía</span>: cuando te llega mercancía. Escribe cuánto llegó y el costo de cada uno. Si el costo cambió, la app saca el costo promedio para que la ganancia sea la real.</li>
+    <li><span class="btn">Salida o ajuste</span>: lo que se dañó o venció, lo que se usó en la casa, lo que devolviste al proveedor, o un ajuste. Siempre pide el motivo.</li>
+    <li><span class="btn">Conteo físico</span>: cuentas lo que hay de verdad en el colmado y lo escribes. La app corrige la diferencia y la anota.</li>
+  </ul>
+  <figure class="half"><img src="m17-entrada.png" /><figcaption>Entrada de mercancía.</figcaption></figure>
+  <div class="key"><b>¿Por qué no se puede cambiar la existencia a mano?</b>Para que siempre quede escrito qué pasó con cada cosa. Así nada se pierde sin explicación.</div>
+</section>
+
+<section class="chapter">
+  <h1>9. Clientes y fiado</h1>
+  <p>Registra a los clientes que fían o que juegan seguido. Con <span class="btn">Nuevo cliente</span> pones nombre, teléfono (WhatsApp) y, si quieres, un <b>límite de fiado</b>.</p>
+  <figure class="half"><img src="m15-cliente-nuevo.png" /><figcaption>Cliente nuevo.</figcaption></figure>
+  <p>Si tocas un cliente, ves <b>cuánto debe</b>, lo que jugó en la lotería en los últimos 30 días y su <b>cuenta</b>: cada fiado y cada abono.</p>
+  <figure><img src="m18-cliente.png" /><figcaption>La cuenta de un cliente.</figcaption></figure>
+  <ul>
+    <li><span class="btn">Registrar abono</span>: cuando te paga. Escribe cuánto (o toca «Lo paga todo»).</li>
+    <li><span class="btn">Recordarle por WhatsApp</span>: le manda un mensaje amable con lo que debe.</li>
+  </ul>
+  <figure class="half"><img src="m19-abono.png" /><figcaption>Registrar un abono.</figcaption></figure>
+</section>
+
+<section class="chapter">
+  <h1>10. Ventas: recibos, anular y devolver</h1>
+  <p>Aquí están las ventas de la tienda de cada día, con el total y cuánto entró por cada forma de pago. Con las flechas cambias de día.</p>
+  <figure><img src="m20-ventas.png" /><figcaption>Las ventas del día.</figcaption></figure>
+  <p>Si tocas una venta, ves su recibo y lo puedes volver a mandar. Desde ahí también:</p>
+  <ul>
+    <li><span class="btn">Devolver productos</span>: si el cliente trae algo. Pones cuántos devuelve; la mercancía vuelve al inventario y el dinero se descuenta de la venta.</li>
+    <li><span class="btn">Anular venta</span>: si la venta fue un error. Todo vuelve al inventario y, si era fiada, se le quita al cliente.</li>
+  </ul>
+  <p>Las dos piden el <b>PIN de la dueña</b> y el porqué, y quedan anotadas en la bitácora.</p>
+  <figure class="half"><img src="m21-venta-detalle.png" /><figcaption>Detalle de una venta.</figcaption></figure>
+</section>
+
+<section class="chapter">
+  <h1>11. Reportes</h1>
+  <p>Escoge el período: <b>Hoy, Esta semana, Este mes</b> u <b>Otras fechas</b>. Vas a ver:</p>
+  <ul>
+    <li><b>Lotería:</b> venta, comisión ganada, premios y lo que entregar, día por día.</li>
+    <li><b>Tienda:</b> lo vendido, lo que te costó y la <b>ganancia</b>, la venta de cada día y lo que más se vende.</li>
+    <li><b>Inventario ahora:</b> cuántos productos hay y cuánto vale la mercancía (al costo y al precio).</li>
+    <li><b>Quién debe más:</b> los clientes con más fiado.</li>
+  </ul>
+  <figure><img src="m22-reportes.png" /><figcaption>Reportes de hoy.</figcaption></figure>
+  <p>Los reportes solo los ven la dueña y «solo mirar». El empleado no ve ganancias.</p>
+</section>
+
+<section class="chapter">
+  <h1>12. Varios equipos: vincular con el QR</h1>
+  <p>Puedes usar Martina en el iPad <b>y</b> en tu teléfono, darle un equipo a un empleado o dejar que Jean Carlos mire los números desde el suyo. <b>Todos ven y anotan lo mismo.</b></p>
+  <ul>
+    <li>Si no hay internet, sigues trabajando normal: lo anotado se sube solo cuando vuelve.</li>
+    <li>Además, todo queda guardado en la nube: si se pierde el iPad, no se pierde nada.</li>
+  </ul>
+  <h3>Vincular un equipo nuevo</h3>
+  <ol>
+    <li>En el equipo nuevo, instala Martina desde Safari (capítulo 1) y ábrela <b>desde el ícono</b>.</li>
+    <li>En la bienvenida toca <span class="btn">Ya uso Martina en otro equipo: escanear su QR</span>.</li>
+    <li>En tu iPad: <b>Ajustes › Equipos › Mostrar QR para vincular otro equipo</b> (pide tu PIN).</li>
+    <li>Con el equipo nuevo, escanea ese código y toca <span class="btn">Vincular</span>. Baja todo y te pide el PIN.</li>
+  </ol>
+  <figure><img src="m23-equipos.png" /><figcaption>Ajustes › Equipos: los equipos vinculados.</figcaption></figure>
+  <div class="warn"><b>El QR es la llave de tu negocio</b>Quien lo escanee, entra. No le mandes foto del QR a nadie. Muéstralo solo cuando vayas a vincular un equipo.</div>
+  <ul>
+    <li>El código se escanea <b>desde dentro de la app</b>. Si lo escaneas con la cámara normal del iPhone, Safari te explica cómo hacerlo.</li>
+    <li>En el menú se ve si está <b>«Al día»</b>, <b>«Sincronizando…»</b> o <b>«Sin internet»</b>.</li>
+    <li>Cada equipo tiene una letra (A, B…), y sus recibos la llevan: #A-12, #B-3.</li>
+    <li><span class="btn">Quitar</span> un equipo: si se perdió o era de alguien que ya no trabaja contigo. Cuando ese equipo se conecte, se le borra todo y ya no entra.</li>
+  </ul>
+</section>
+
+<section class="chapter">
+  <h1>13. Ajustes</h1>
+  <ul>
+    <li><b>Equipos:</b> vincular, ver y quitar equipos (capítulo 12).</li>
+    <li><b>Respaldo:</b> <span class="btn">Guardar respaldo</span> hace un archivo con todo (para guardarlo en Archivos/iCloud o mandártelo por WhatsApp). <span class="btn">Recuperar un respaldo</span> pone lo del archivo en lugar de lo que hay. Úsalo con cuidado.</li>
+    <li><b>Negocio:</b> el nombre, lo que sale al final del recibo, tu <b>comisión</b> de lotería, la lista de <b>loterías que vendes</b> (si la pones, al anotar escoges de cuál es y el cuadre las separa), el ITBIS y si se puede vender sin existencia.</li>
+    <li><b>Seguridad:</b> <span class="btn">Cambiar mi PIN</span>, cada cuánto se bloquea sola, y las personas que usan la app.</li>
+    <li><b>Categorías y proveedores:</b> para organizar los productos.</li>
+    <li><b>Bitácora:</b> lo último que se hizo y quién lo hizo (anulaciones, cierres, cambios de precio…).</li>
+  </ul>
+  <figure><img src="m24-ajustes-negocio.png" /><figcaption>Ajustes del negocio.</figcaption></figure>
+  <h3>Agregar a otra persona</h3>
+  <p>En Seguridad, toca <span class="btn">Agregar persona</span>, ponle su nombre, lo que puede hacer y su propio PIN. A quien ya no use la app, la puedes <b>desactivar</b>, y si alguien olvidó su PIN, le pones uno nuevo.</p>
+  <figure class="half"><img src="m25-agregar-persona.png" /><figcaption>Agregar una persona.</figcaption></figure>
+</section>
+
+<section class="chapter">
+  <h1>14. Quién puede hacer qué</h1>
+  <table>
+    <tr><th></th><th class="c">Dueña</th><th class="c">Empleado</th><th class="c">Solo mirar</th></tr>
+    <tr><td>Vender, anotar lotería, pagar premios</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">No</td></tr>
+    <tr><td>Registrar clientes y abonos</td><td class="c yes">Sí</td><td class="c yes">Sí</td><td class="c no">No</td></tr>
+    <tr><td>Ver costos, ganancias y reportes</td><td class="c yes">Sí</td><td class="c no">No</td><td class="c yes">Sí</td></tr>
+    <tr><td>Anular, devolver o cerrar el día</td><td class="c yes">Sí</td><td class="c pin">Con PIN de la dueña</td><td class="c no">No</td></tr>
+    <tr><td>Reabrir un día cerrado</td><td class="c yes">Sí</td><td class="c no">No</td><td class="c no">No</td></tr>
+    <tr><td>Productos nuevos y mover inventario</td><td class="c yes">Sí</td><td class="c pin">Con PIN de la dueña</td><td class="c no">No</td></tr>
+    <tr><td>Mostrar el QR para vincular</td><td class="c yes">Sí</td><td class="c pin">Con PIN de la dueña</td><td class="c pin">Con PIN de la dueña</td></tr>
+    <tr><td>Ajustes del negocio, personas, respaldo</td><td class="c yes">Sí</td><td class="c no">No</td><td class="c no">No</td></tr>
+  </table>
+  <p>Cuando el empleado necesita algo de la dueña, la app muestra el teclado para que <b>tú</b> pongas tu PIN ahí mismo.</p>
+
+  <h1 style="margin-top:10mm">15. Cuidados importantes y preguntas</h1>
+  <div class="warn"><b>Abre la app siempre desde el ícono</b>No desde Safari: Safari guarda sus datos aparte.</div>
+  <div class="warn"><b>No compartas tu PIN ni el QR</b>Con tu PIN se puede anular y cerrar días. Con el QR se entra al negocio.</div>
+  <h3>¿Qué pasa si se me va el internet?</h3>
+  <p>Nada: sigues vendiendo y anotando. Cuando vuelve, se sube solo.</p>
+  <h3>¿Qué pasa si se me pierde o se me daña el iPad?</h3>
+  <p>Si estaba vinculado, todo está en la nube. Instala Martina en el iPad nuevo y vincúlalo con el QR de otro equipo, o, si no tienes otro, con el código que te da Jean Carlos: se baja todo. Desde otro equipo, <b>quita</b> el iPad perdido en Ajustes › Equipos.</p>
+  <h3>¿Puedo borrar el ícono de la app?</h3>
+  <p>Si el equipo está vinculado, se puede volver a vincular y bajar todo. Si no está vinculado, <b>borrar el ícono borra todo</b>: haz un respaldo antes.</p>
+  <h3>Anoté algo mal en la lotería</h3>
+  <p>Mientras el día esté abierto, anúlalo con la basurita y anótalo bien. Si el día ya está cerrado, la dueña lo reabre, lo corrige y lo vuelve a cerrar.</p>
+  <h3>Se me olvidó el PIN</h3>
+  <p>Si eres empleado, la dueña te pone uno nuevo en Ajustes › Seguridad. Si eres la dueña, avísale a Jean Carlos.</p>
+</section>
+
+</body>
+</html>
