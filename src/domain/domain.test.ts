@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import Dexie from 'dexie';
 import { getDeviceLocal, getSettings, MartinaDb, saveSettings } from '../db/database';
+import type { Client } from '../db/types';
 import { addProduct, newWorld } from '../test/helpers';
 import { exportBackup, importBackup } from './backup';
-import { createClient } from './clients';
+import { createClient, exactClient, setClientActive, similarClients } from './clients';
 import { BusinessError, dayKeyOf, newId } from './common';
-import { addCharge, clientAccount, registerPayment, updateCreditEntry, voidCreditEntry } from './credit';
+import { addCharge, clientAccount, passesCreditLimit, registerPayment, updateCreditEntry, voidCreditEntry } from './credit';
 import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, updateLotterySale, updatePrize, voidLotterySale, voidPrize } from './lottery';
 import { createProduct, updateProduct } from './products';
 import { salesReport, stockAlerts } from './reports';
@@ -213,6 +214,34 @@ describe('fiado', () => {
     expect((await w.db.clients.get(ana))!.balanceCents).toBe(5000);
   });
 
+  it('anular una venta que ya tuvo una devolución solo deshace lo que falta (no descuenta dos veces)', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const ana = await newClient(w.db, 'Ana');
+    const s1 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    await returnItems(w.db, s1.id, [{ productId: p.id, quantity: 1 }], w.owner.id, 'devolvió uno');
+    await voidSale(w.db, s1.id, w.owner.id, 'error');
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(0);
+    expect((await w.db.products.get(p.id))!.stock).toBe(10);
+    expect((await salesReport(w.db, today(), today())).salesCents).toBe(0);
+
+    // Fiada y ya pagada: lo devuelto se le dio en efectivo; al anular, lo que no devolvió le queda a favor.
+    const rosa = await newClient(w.db, 'Rosa');
+    const s2 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 2 }], payment: 'credit', clientId: rosa, requestId: newId(), userId: w.owner.id });
+    await registerPayment(w.db, rosa, 10000, w.owner.id);
+    await returnItems(w.db, s2.id, [{ productId: p.id, quantity: 1 }], w.owner.id, 'devolvió uno');
+    await voidSale(w.db, s2.id, w.owner.id, 'error');
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(-5000);
+    expect((await w.db.products.get(p.id))!.stock).toBe(10);
+
+    // En efectivo, devuelto todo y después anulada: la existencia no sube de más.
+    const s3 = await createSale(w.db, { lines: [{ productId: p.id, quantity: 3 }], payment: 'cash', requestId: newId(), userId: w.owner.id });
+    await returnItems(w.db, s3.id, [{ productId: p.id, quantity: 3 }], w.owner.id, 'devolvió todo');
+    await voidSale(w.db, s3.id, w.owner.id, 'error');
+    expect((await w.db.products.get(p.id))!.stock).toBe(10);
+    expect((await salesReport(w.db, today(), today())).salesCents).toBe(0);
+  });
+
   it('no deja dos clientes con el mismo nombre (aunque cambien mayúsculas o acentos)', async () => {
     const w = await newWorld();
     await createClient(w.db, { name: 'José Pérez', phone: '809-555-1234' }, w.owner.id);
@@ -248,6 +277,106 @@ describe('fiado', () => {
     await expect(registerPayment(w.db, rosa, 100, w.owner.id, undefined, dayKeyOf(new Date(Date.now() + 48 * 60 * 60 * 1000)))).rejects.toThrow(
       /no ha llegado/,
     );
+  });
+
+  it('un cliente archivado que vuelve a deber se reactiva solo (no queda escondido con la deuda)', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const ana = await newClient(w.db, 'Ana');
+    await setClientActive(w.db, ana, false, w.owner.id);
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    expect(await w.db.clients.get(ana)).toMatchObject({ balanceCents: 5000, active: true });
+
+    // Se anula un abono de una clienta ya archivada: vuelve a deber y vuelve a la lista.
+    const rosa = await newClient(w.db, 'Rosa');
+    await addCharge(w.db, rosa, 1000, w.owner.id, 'libreta');
+    const pago = await registerPayment(w.db, rosa, 1000, w.owner.id);
+    await setClientActive(w.db, rosa, false, w.owner.id);
+    await voidCreditEntry(w.db, pago.id, w.owner.id, 'no pagó');
+    expect(await w.db.clients.get(rosa)).toMatchObject({ balanceCents: 1000, active: true });
+    // Y no se puede archivar a quien todavía debe.
+    await expect(setClientActive(w.db, rosa, false, w.owner.id)).rejects.toThrow(/todavía debe/);
+  });
+
+  it('un nombre a medias sugiere los clientes parecidos (sin tildes), primero los que más deben', () => {
+    const c = (name: string, balanceCents = 0) => ({ id: name, name, balanceCents, active: true, createdAt: '' }) as Client;
+    const list = [c('Pedro Gómez', 200), c('Pedro Martínez', 900), c('Doña Rosa', 100), c('Rosa María'), c('Juana'), c('Juan')];
+    expect(similarClients('pedro', list).map(x => x.name)).toEqual(['Pedro Martínez', 'Pedro Gómez']);
+    expect(similarClients('rosa', list).map(x => x.name)).toEqual(['Doña Rosa', 'Rosa María']);
+    expect(similarClients('dona', list).map(x => x.name)).toEqual(['Doña Rosa']);
+    expect(similarClients('ped  go', list).map(x => x.name)).toEqual(['Pedro Gómez']);
+    // El nombre exacto no es "parecido", y "ana" no es el comienzo de ningún nombre (Juana no cuenta).
+    expect(similarClients('juan', list).map(x => x.name)).toEqual(['Juana']);
+    expect(similarClients('ana', list)).toEqual([]);
+    expect(similarClients('   ', list)).toEqual([]);
+    expect(exactClient('  pedro   GOMEZ ', list)?.name).toBe('Pedro Gómez');
+    expect(exactClient('Pedro', list)).toBeUndefined();
+  });
+
+  it('un nombre mal escrito (una letra, s/z, letras volteadas) encuentra al cliente; un nombre nuevo de verdad no', () => {
+    const c = (name: string, balanceCents = 0) => ({ id: name, name, balanceCents, active: true, createdAt: '' }) as Client;
+    const list = [c('María Altagracia Rodríguez Peña', 1250000), c('Pedro Gómez', 20000), c('Doña Rosa', 10000), c('Juan')];
+    const names = (typed: string) => similarClients(typed, list).map(x => x.name);
+    expect(names('Pedro Gomes')).toEqual(['Pedro Gómez']);
+    expect(names('Pedor')).toEqual(['Pedro Gómez']);
+    expect(names('Gomes')).toEqual(['Pedro Gómez']);
+    expect(names('Maria Rodrigues')).toEqual(['María Altagracia Rodríguez Peña']);
+    expect(names('Doña Rossa')).toEqual(['Doña Rosa']);
+    expect(names('Jaun')).toEqual(['Juan']);
+    for (const nuevo of ['Ana', 'Luis', 'Carmen', 'José Martínez', 'Ramón', 'Yokasta', 'Wilson', 'Pedro Martínez']) expect(names(nuevo)).toEqual([]);
+    // El que se llama exactamente así no es "parecido" (pero sí los demás casi iguales: posible cuenta repetida).
+    expect(names('Pedro Gómez')).toEqual([]);
+    expect(similarClients('Pedro Gomes', [...list, c('Pedro Gomes', 5000)]).map(x => x.name)).toEqual(['Pedro Gómez']);
+  });
+
+  it('el límite de fiado: la misma regla para avisar en pantalla y para no dejar guardar', async () => {
+    expect(passesCreditLimit({ balanceCents: 10000, creditLimitCents: 12000 }, 5000)).toBe(true);
+    expect(passesCreditLimit({ balanceCents: 10000, creditLimitCents: 12000 }, 2000)).toBe(false);
+    expect(passesCreditLimit({ balanceCents: 10000 }, 999999)).toBe(false);
+    const w = await newWorld();
+    const rosa = await newClient(w.db, 'Rosa', 12000);
+    await addCharge(w.db, rosa, 10000, w.owner.id, 'libreta');
+    await expect(addLotterySale(w.db, { amountCents: 5000, clientId: rosa, credit: true, userId: w.owner.id, requestId: newId() })).rejects.toThrow(/límite/);
+    await addLotterySale(w.db, { amountCents: 2000, clientId: rosa, credit: true, userId: w.owner.id, requestId: newId() });
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(12000);
+  });
+
+  it('fiarle a alguien nuevo lo registra junto con la venta o la jugada; si no se hace, no queda registrado', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 1);
+    // No hay existencia para 3: no se vende y "Ana Pérez" no queda registrada.
+    await expect(
+      createSale(w.db, { lines: [{ productId: p.id, quantity: 3 }], payment: 'credit', newClientName: 'Ana Pérez', requestId: newId(), userId: w.owner.id }),
+    ).rejects.toThrow();
+    expect(await w.db.clients.count()).toBe(0);
+    const sale = await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'credit', newClientName: 'Ana  Pérez ', requestId: newId(), userId: w.owner.id });
+    const [ana] = await w.db.clients.toArray();
+    expect(ana).toMatchObject({ name: 'Ana Pérez', balanceCents: 5000 });
+    expect(sale).toMatchObject({ clientId: ana.id, clientName: 'Ana Pérez' });
+    // En la lotería igual (y no se puede registrar dos veces el mismo nombre).
+    const play = await addLotterySale(w.db, { amountCents: 2500, credit: true, newClientName: 'Luis', userId: w.owner.id, requestId: newId() });
+    const luis = await w.db.clients.get(play.clientId!);
+    expect(luis).toMatchObject({ name: 'Luis', balanceCents: 2500 });
+    await expect(addLotterySale(w.db, { amountCents: 100, credit: true, newClientName: 'luis', userId: w.owner.id, requestId: newId() })).rejects.toThrow(/Ya hay/);
+    expect(await w.db.clients.count()).toBe(2);
+  });
+
+  it('con saldo a favor se puede corregir la nota o acercarlo a cero, pero no dejarlo más en negativo', async () => {
+    const w = await newWorld();
+    const pedro = await newClient(w.db, 'Pedro');
+    const play = await addLotterySale(w.db, { amountCents: 30000, clientId: pedro, credit: true, userId: w.owner.id, requestId: newId() });
+    const abono = await registerPayment(w.db, pedro, 10000, w.owner.id);
+    await voidLotterySale(w.db, play.id, w.owner.id, 'se anotó mal');
+    const balance = async () => (await w.db.clients.get(pedro))!.balanceCents;
+    expect(await balance()).toBe(-10000);
+    await updateCreditEntry(w.db, abono.id, { amountCents: 10000, note: 'en efectivo' }, w.owner.id);
+    await updateCreditEntry(w.db, abono.id, { amountCents: 5000 }, w.owner.id);
+    expect(await balance()).toBe(-5000);
+    await expect(updateCreditEntry(w.db, abono.id, { amountCents: 8000 }, w.owner.id)).rejects.toThrow(/menos de cero/);
+    const deuda = await addCharge(w.db, pedro, 1000, w.owner.id, 'refresco');
+    await expect(voidCreditEntry(w.db, deuda.id, w.owner.id, 'no era')).rejects.toThrow(/menos de cero/);
+    await voidCreditEntry(w.db, abono.id, w.owner.id, 'no pagó');
+    expect(await balance()).toBe(1000);
   });
 
   it('el fiado que viene de una venta o jugada se corrige desde Ventas o Lotería, no en la cuenta', async () => {
@@ -290,8 +419,8 @@ describe('lotería (el cuadre del día)', () => {
       deliverCents: 70000, // 1,000 - 100 - 200 = RD$ 700
     });
     expect(day.clients).toEqual([
-      { name: 'Ana', purchases: 1, purchasesCents: 40000, prizes: 2, prizesCents: 20000 },
-      { name: 'Pedro', purchases: 2, purchasesCents: 60000, prizes: 0, prizesCents: 0 },
+      { name: 'Ana', purchases: 1, purchasesCents: 40000, prizes: 2, prizesCents: 20000, creditCents: 0 },
+      { name: 'Pedro', purchases: 2, purchasesCents: 60000, prizes: 0, prizesCents: 0, creditCents: 0 },
     ]);
   });
 

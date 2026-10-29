@@ -42,7 +42,7 @@
     --bad-soft: #3d1c19;
     --warn: #f5c35a;
     --warn-soft: #3a2e14;
-    --whatsapp: #2fbf6c;
+    --whatsapp: #1a7f45;
     --shadow: none;
     color-scheme: dark;
   }
@@ -256,12 +256,12 @@ button:focus-visible {
 }
 .two-cols {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 @media (max-width: 700px) {
   .two-cols {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -276,10 +276,13 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: 12px;
   background: var(--surface-2);
   height: 100%;
+  /* La cifra se achica sola si no cabe en su cuadro (--len = cuántas letras tiene, lo pone <Stat>). */
+  container-type: inline-size;
 }
 .stat-label {
   font-size: 13px;
@@ -288,6 +291,8 @@ button:focus-visible {
 }
 .stat-value {
   font-size: 22px;
+  font-size: min(22px, calc(100cqi / (var(--len, 10) * 0.6)));
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .stat-sub {
@@ -296,6 +301,7 @@ button:focus-visible {
 }
 .stat.big .stat-value {
   font-size: 27px;
+  font-size: min(27px, calc(100cqi / (var(--len, 10) * 0.6)));
 }
 .stat.good .stat-value {
   color: var(--good);
@@ -365,6 +371,7 @@ button:focus-visible {
 }
 .btn.block {
   width: 100%;
+  white-space: normal;
 }
 .btn.link {
   border: none;
@@ -416,6 +423,7 @@ button:focus-visible {
 }
 .field.inline {
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   font-size: 15px;
@@ -424,6 +432,8 @@ button:focus-visible {
 .field.inline input,
 .field.inline select {
   width: auto;
+  max-width: 100%;
+  min-width: 0;
 }
 .hint {
   font-size: 13px;
@@ -491,6 +501,10 @@ button:focus-visible {
   gap: 8px;
   align-items: center;
   margin-top: 12px;
+}
+/* El botón de anotar ocupa lo que sobra de la fila; si no cabe completo, baja a su propia línea. */
+.quick > .btn.grow {
+  flex: 1 1 180px;
 }
 .entry-form form {
   margin-top: 14px;
@@ -605,6 +619,7 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  gap: 2px;
   text-align: right;
 }
 .amount {
@@ -791,6 +806,8 @@ button.chip {
 .overlay {
   position: fixed;
   inset: 0;
+  /* Una ventana puede ir dentro de una tarjeta (la pregunta de a quién se le fía): que no herede su margen. */
+  margin: 0 !important;
   z-index: 50;
   display: flex;
   align-items: center;
@@ -835,6 +852,19 @@ button.chip {
   padding: 12px 20px 16px;
   border-top: 1px solid var(--border);
 }
+/* Un botón con texto largo ("WhatsApp a María Altagracia Rodríguez Peña") baja de renglón en vez de salirse. */
+.modal-foot .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+.btn svg {
+  flex-shrink: 0;
+}
+/* En una ventana, cada número tiene su espacio: en el teléfono van uno debajo del otro. */
+.modal .stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+}
 
 .toasts {
   position: fixed;
@@ -869,18 +899,23 @@ button.chip {
 .update-banner {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
-  left: 50%;
+  left: 12px;
+  right: 12px;
   z-index: 70;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 12px;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0 auto;
   padding: 10px 12px 10px 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-  transform: translateX(-50%);
-  white-space: nowrap;
+  text-align: center;
 }
 
 /* ---------- Entrada (PIN) ---------- */
@@ -1006,8 +1041,18 @@ button.chip {
 }
 @media (max-width: 900px) {
   .sell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding-bottom: 76px;
+  }
+  /* Con un total grande, "Cobrar" va arriba y el monto abajo, en vez de empujar la pantalla de lado. */
+  .sell-bar .btn,
+  .cart-actions .btn {
+    min-width: 0;
+  }
+  .sell-bar .btn.primary,
+  .cart-actions .btn.primary {
+    white-space: normal;
+    line-height: 1.15;
   }
   .sell-cart {
     position: static;
@@ -1301,4 +1346,495 @@ button.chip {
   text-align: right;
   padding-top: 2px !important;
   padding-bottom: 2px !important;
+}
+
+/* Lista de clientes: lo que debe cada uno siempre visible; en pantallas angostas los botones bajan a otra línea. */
+.client-row .debt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  white-space: nowrap;
+}
+.client-row .debt small {
+  font-size: 12px;
+}
+.client-row .debt strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.row-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .client-row {
+    flex-wrap: wrap;
+    row-gap: 0 !important;
+  }
+  .client-row .row-button {
+    flex: 1 1 100%;
+  }
+  .client-row .row-tools {
+    margin-left: auto;
+    padding-bottom: 6px;
+  }
+}
+
+/* "debe RD$ X" debajo del nombre de un cliente (tabla de la lotería). */
+.owes {
+  display: block;
+  color: var(--bad);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* ---------- Lo que deben los clientes, a la vista en todas partes ---------- */
+
+/* Lista de clientes: el nombre se acomoda en varias líneas en vez de empujar el monto y los botones fuera. */
+.clients-list .row-button,
+.clients-list .row-button .grow {
+  min-width: 0;
+}
+.clients-list .row-button strong {
+  overflow-wrap: anywhere;
+}
+
+/* Inicio: los que más deben, dentro de la tarjeta "Pendiente por cobrar". */
+.debt-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+/* Debajo del campo Cliente: los clientes que se parecen a lo escrito, con lo que debe cada uno. */
+.client-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.client-suggest .chip {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: 12px;
+  line-height: 1.25;
+  text-align: left;
+  white-space: normal;
+}
+.client-suggest .chip small {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* "¿A quién se le fía?": un botón grande por cliente, con lo que debe debajo del nombre. */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.choice-list .btn {
+  flex-direction: column;
+  gap: 0;
+  min-height: 52px;
+  padding: 8px 16px;
+  line-height: 1.25;
+  white-space: normal;
+}
+.choice-list .btn small {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* Cobrar: lo que debe el cliente (y cuánto deberá si se le fía), en grande. */
+.owes-line {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-size: 16px;
+  font-weight: 600;
+}
+.owes-line.good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.owes-line small {
+  font-weight: 500;
+}
+
+/* Las 4 formas de pago siempre completas (en el teléfono, dos y dos). */
+.segmented.pay-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.segmented.pay-tabs button {
+  padding: 0 6px;
+}
+@media (max-width: 600px) {
+  .segmented.pay-tabs {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.row2 > .field.full,
+.row3 > .field.full {
+  grid-column: 1 / -1;
+}
+
+/* Una tabla dentro de una ventana: que baje la ventana entera y no quede en una cajita con su propio scroll. */
+.modal-body > .table-wrap {
+  flex-shrink: 0;
+}
+
+/* Lotería, "Clientes del día": en el teléfono, cuántas veces va junto al monto (no en su columna). */
+.count-inline,
+.mobile-only {
+  display: none;
+}
+
+/* Lotería, listas de jugadas y premios: monto con "Fiado" debajo; en pantallas muy chicas el lápiz y la basurita
+   bajan a otra línea para que el nombre no quede apretado. */
+.entry-row .right {
+  gap: 2px;
+}
+.entry-row .row-tools {
+  display: flex;
+  flex-shrink: 0;
+}
+@media (max-width: 400px) {
+  .entry-row {
+    flex-wrap: wrap;
+    row-gap: 0 !important;
+  }
+  .entry-row .grow {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .entry-row .row-tools {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* Filtros de varias opciones en pantallas chicas: más apretados y, si aun así no caben, en dos filas. */
+@media (max-width: 400px) {
+  .segmented {
+    flex-wrap: wrap;
+  }
+  .segmented button {
+    flex: 1 1 auto;
+    padding: 0 8px;
+    font-size: 14px;
+  }
+}
+
+/* "Más" del menú de abajo en el teléfono. */
+.more-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.more-menu .btn {
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 52px;
+  font-size: 17px;
+}
+
+/* Teléfono: 4 botones + "Más" (App.tsx) que se reparten todo el ancho; nada queda escondido de lado. */
+@media (max-width: 700px) {
+  .nav button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .card-head {
+    flex-wrap: wrap;
+  }
+  .stats > .stat.big:first-child {
+    grid-column: 1 / -1;
+  }
+  .table.day-clients .count {
+    display: none;
+  }
+  .table.day-clients .count-inline,
+  .mobile-only {
+    display: inline;
+  }
+  .table.day-clients th,
+  .table.day-clients td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  /* El monto nunca se parte ("RD$" va pegado al número), pero "(2)" y "fiado …" sí pueden bajar de línea. */
+  .table.day-clients td.num {
+    white-space: normal;
+  }
+
+  /* Reportes: cada fila es una tarjetita (el primer dato de título y los números con su nombre encima). */
+  .table.stack,
+  .table.stack tbody {
+    display: block;
+  }
+  .table.stack thead,
+  .desktop-only {
+    display: none;
+  }
+  .table.stack tr {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 4px 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .table.stack td {
+    padding: 0;
+    border: none;
+    text-align: left !important;
+  }
+  .table.stack td:first-child {
+    grid-column: 1 / -1;
+    font-weight: 700;
+  }
+  .table.stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  /* Cuenta del cliente: cada línea es una tarjetita (qué y monto arriba; fecha y lo que quedó debiendo abajo). */
+  .table.account,
+  .table.account tbody {
+    display: block;
+  }
+  .table.account thead {
+    display: none;
+  }
+  .table.account tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'what amt' 'when after' 'acts acts';
+    column-gap: 12px;
+    row-gap: 2px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .table.account td {
+    padding: 0;
+    border: none;
+  }
+  .table.account .what {
+    grid-area: what;
+  }
+  .table.account .amt {
+    grid-area: amt;
+    font-weight: 700;
+  }
+  .table.account .when {
+    grid-area: when;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .table.account .after {
+    grid-area: after;
+    font-size: 13px;
+  }
+  .table.account .acts {
+    grid-area: acts;
+    justify-self: end;
+  }
+  .table.account .acts:empty {
+    display: none;
+  }
+}
+@media (max-width: 400px) {
+  .table.day-clients {
+    font-size: 14px;
+  }
+  /* Teléfonos chicos: la columna "Se sacó" se esconde y el premio va debajo del monto (así nunca hay que deslizar). */
+  .table.day-clients .won {
+    display: none;
+  }
+  .table.day-clients .prize-inline {
+    display: block;
+  }
+  /* Cuenta del cliente: "quedó debiendo" arriba del monto, para que "Qué" tenga más espacio. */
+  .table.account .after {
+    white-space: normal;
+  }
+  .table.account .after .mobile-only {
+    display: block;
+  }
+}
+
+/* Lotería: el premio debajo del monto (solo en teléfonos chicos, ver arriba). */
+.prize-inline {
+  display: none;
+  color: var(--bad);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* "a favor RD$ X" en verde (.owes es rojo). */
+.owes.good-text {
+  color: var(--good);
+}
+/* El nombre del cliente en "Clientes del día": se toca para abrir su cuenta. */
+.cell-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cell-link-name {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* "Ojo, también está:" encima de las sugerencias, en su propia línea. */
+.client-suggest > small {
+  flex-basis: 100%;
+  font-weight: 600;
+}
+/* Pestañas de una ventana: que no se aplasten cuando la ventana tiene mucho. */
+.modal-body > .segmented {
+  flex-shrink: 0;
+}
+/* Con una ventana abierta, los avisos salen arriba para no tapar sus botones. */
+body:has(.overlay) .toasts {
+  top: calc(16px + env(safe-area-inset-top));
+  bottom: auto;
+}
+/* La cuenta del cliente: al bajar la ficha, los títulos de las columnas se quedan arriba (en el iPad). */
+.account-wrap {
+  overflow: visible;
+}
+.table.account thead th {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  background: var(--surface);
+}
+.table.account .when {
+  white-space: nowrap;
+}
+/* Lotería en el iPad: el nombre del cliente más ancho que "Cuánto jugó" y "Lotería". */
+@media (min-width: 641px) {
+  .entry-form .row3 {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+}
+@media (max-width: 640px) {
+  /* Si el nombre y una deuda muy grande no caben juntos, el monto baja debajo del nombre (sin partir palabras). */
+  .clients-list .row-button {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .clients-list .row-button .grow {
+    flex: 1 1 120px;
+  }
+  .clients-list .row-button .debt {
+    margin-left: auto;
+  }
+  /* Botones largos (Ajustes › Equipos) bajan de renglón en vez de salirse. */
+  .actions .btn {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+}
+
+/* Modo oscuro (va al final para ganarle a las reglas de arriba): botón rojo legible y avisos que se distinguen. */
+@media (prefers-color-scheme: dark) {
+  .btn.danger {
+    background: #c4321f;
+    border-color: #c4321f;
+  }
+  .toast {
+    background: #3a3446;
+    border: 1px solid #5a5268;
+  }
+}
+/* En el teléfono, con una ventana abierta, el aviso va arriba a la izquierda: no tapa la X de cerrar. */
+@media (max-width: 700px) {
+  body:has(.overlay) .toasts {
+    left: 12px;
+    right: 76px;
+    width: auto;
+    transform: none;
+  }
+  body:has(.overlay) .toast {
+    align-self: flex-start;
+  }
+}
+@media (max-width: 360px) {
+  .modal-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+    gap: 8px;
+  }
+  .modal-foot .btn {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+/* Casillas que no se aplastan cuando el texto ocupa dos renglones. */
+.check input[type='checkbox'] {
+  flex-shrink: 0;
+}
+/* Lotería: "Nacional: venta … · premios …" baja de renglón en vez de salirse. */
+.lottery-chips .chip {
+  max-width: 100%;
+  border-radius: 14px;
+  white-space: normal;
+}
+/* Carrito: con un monto grande, el monto baja debajo del nombre en vez de encimarse. */
+.cart-line {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.cart-line .grow {
+  flex: 1 1 120px;
+}
+.cart-line .amount {
+  margin-left: auto;
+}
+/* Ajustes › Quién usa la app: en el teléfono los botones bajan debajo del nombre. */
+.user-row {
+  flex-wrap: wrap;
+}
+.user-row > .grow {
+  flex: 1 1 140px;
+}
+.user-row > .row-tools {
+  margin-left: auto;
+  gap: 8px;
+}
+/* Reportes: cada tarjeta mide lo suyo (no se estira hasta el alto de la de al lado). */
+.two-cols.top {
+  align-items: start;
+}
+@media (max-width: 400px) {
+  .sales-list .row-button {
+    gap: 8px;
+  }
+  .sales-list .row-button > .tag {
+    padding: 3px 5px;
+  }
 }

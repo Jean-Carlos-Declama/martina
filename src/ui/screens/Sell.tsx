@@ -2,11 +2,14 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { db } from '../../db/database';
 import type { PaymentMethod, Product, Sale } from '../../db/types';
+import { exactClient } from '../../domain/clients';
 import { newId } from '../../domain/common';
-import { matchesSearch, normalize } from '../../domain/products';
+import { passesCreditLimit } from '../../domain/credit';
+import { matchesSearch } from '../../domain/products';
 import { createSale, receiptNumber } from '../../domain/sales';
+import { ClientSuggestions, CreditPreview, showsSuggestions, useCreditClient, type CreditTarget } from '../clientPick';
 import { useSession, useUi } from '../context';
-import { formatQty, moneyField, parseMoney, parseQty, PAYMENT_LABELS, plural, qtyWithUnit } from '../format';
+import { balanceLabel, formatQty, moneyField, parseMoney, parseQty, PAYMENT_LABELS, qtyWithUnit } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, PhotoThumb, Segmented } from '../kit';
 import { openWhatsApp, receiptText, shareText } from '../share';
@@ -77,7 +80,8 @@ export function Sell() {
   };
 
   const subtotal = cart.reduce((sum, i) => sum + Math.round(i.priceCents * i.quantity) - i.discountCents, 0);
-  const units = cart.reduce((sum, i) => sum + i.quantity, 0);
+  // Redondeado: 1.1 + 2.2 libras no da 3.3000000000000003.
+  const units = Math.round(cart.reduce((sum, i) => sum + i.quantity, 0) * 1000) / 1000;
 
   const finish = (sale: Sale) => {
     setCart([]);
@@ -150,7 +154,7 @@ export function Sell() {
 
       <aside className="sell-cart card" ref={cartRef}>
         <h2>
-          Venta {cart.length > 0 && <small className="muted">({formatQty(units)} artículos)</small>}
+          Venta {cart.length > 0 && <small className="muted">({`${formatQty(units)} ${units === 1 ? 'artículo' : 'artículos'}`})</small>}
         </h2>
         {cart.length === 0 ? (
           <Empty icon="cart" text="Toca un producto o escanea su código." />
@@ -173,7 +177,9 @@ export function Sell() {
                     className="icon-btn"
                     aria-label="Quitar uno"
                     onClick={() =>
-                      setCart(items => items.flatMap(i => (i.productId !== item.productId ? [i] : i.quantity > 1 ? [{ ...i, quantity: i.quantity - 1 }] : [])))
+                      setCart(items =>
+                        items.flatMap(i => (i.productId !== item.productId ? [i] : i.quantity > 1 ? [{ ...i, quantity: Math.round((i.quantity - 1) * 1000) / 1000 }] : [])),
+                      )
                     }
                   >
                     <Icon name="minus" size={18} />
@@ -181,7 +187,7 @@ export function Sell() {
                   <button
                     className="icon-btn"
                     aria-label="Uno más"
-                    onClick={() => setCart(items => items.map(i => (i.productId === item.productId ? { ...i, quantity: i.quantity + 1 } : i)))}
+                    onClick={() => setCart(items => items.map(i => (i.productId === item.productId ? { ...i, quantity: Math.round((i.quantity + 1) * 1000) / 1000 } : i)))}
                   >
                     <Icon name="plus" size={18} />
                   </button>
@@ -207,7 +213,7 @@ export function Sell() {
       {/* iPad de pie: la venta queda abajo de los productos; esta barra deja cobrar sin bajar. */}
       <div className="sell-bar">
         <button className="btn" disabled={cart.length === 0} onClick={() => cartRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-          <Icon name="cart" /> {plural(units, 'artículo', 'artículos')}
+          <Icon name="cart" /> {`${formatQty(units)} ${units === 1 ? 'artículo' : 'artículos'}`}
         </button>
         <button className="btn primary grow big" disabled={cart.length === 0} onClick={() => setCheckout(true)}>
           Cobrar {money(subtotal)}
@@ -248,7 +254,10 @@ export function Sell() {
                 ...options,
               }),
             );
-            if (sale) finish(sale);
+            if (sale) {
+              if (options.newClientName) toast(`Se registró a ${sale.clientName} como cliente`);
+              finish(sale);
+            }
           }}
         />
       )}
@@ -258,7 +267,7 @@ export function Sell() {
 }
 
 function LineEditor({ item, onClose, onSave }: { item: CartItem; onClose: () => void; onSave: (item: CartItem | null) => void }) {
-  const { settings } = useSession();
+  const { settings, money } = useSession();
   const [qty, setQty] = useState(formatQty(item.quantity).replace(/,/g, ''));
   const [discount, setDiscount] = useState(moneyField(item.discountCents));
   const quantity = parseQty(qty);
@@ -285,6 +294,12 @@ function LineEditor({ item, onClose, onSave }: { item: CartItem; onClose: () => 
         </Field>
         <Field label="Descuento a este producto">{id => <MoneyInput id={id} value={discount} onChange={setDiscount} currency={settings.currency} />}</Field>
       </div>
+      {/* Por qué "Listo" está apagado. */}
+      {quantity === null ? (
+        <p className="error-text">Escribe una cantidad mayor que cero.</p>
+      ) : !valid ? (
+        <p className="error-text">El descuento no puede pasar de {money(Math.round(item.priceCents * quantity))}.</p>
+      ) : null}
     </Modal>
   );
 }
@@ -293,34 +308,47 @@ interface PayOptions {
   payment: PaymentMethod;
   clientId?: string;
   clientName?: string;
+  /** Fiado a alguien nuevo: se registra como cliente junto con la venta. */
+  newClientName?: string;
   discountCents?: number;
 }
 
 function Checkout({ subtotal, onClose, onPay }: { subtotal: number; onClose: () => void; onPay: (options: PayOptions) => Promise<void> }) {
   const { money, settings } = useSession();
+  const { resolveClient, prompt, clients } = useCreditClient();
   const [payment, setPayment] = useState<PaymentMethod>('cash');
   const [name, setName] = useState('');
   const [discount, setDiscount] = useState('');
   const [received, setReceived] = useState('');
   const [busy, setBusy] = useState(false);
-  const clients = useLiveQuery(() => db.clients.filter(c => c.active).toArray(), []);
-  const client = clients?.find(c => normalize(c.name) === normalize(name));
+  const client = exactClient(name, clients);
+  const fiado = payment === 'credit';
   const discountCents = parseMoney(discount) ?? 0;
   const total = subtotal - discountCents;
   const receivedCents = parseMoney(received);
   const change = receivedCents !== null ? receivedCents - total : null;
+  const overLimit = fiado && !!client && passesCreditLimit(client, total);
   const problem =
     discountCents > subtotal
       ? 'El descuento es mayor que la venta.'
-      : payment === 'credit' && !client
-        ? 'Para fiar, escribe el nombre de un cliente registrado.'
-        : payment === 'cash' && change !== null && change < 0
-          ? 'Lo recibido no alcanza.'
-          : '';
+      : fiado && !name.trim()
+        ? 'Para fiar, escribe o escoge a quién se le fía.'
+        : overLimit
+          ? `No se puede fiar: ${client.name} se pasaría de su límite de fiado.`
+          : payment === 'cash' && change !== null && change < 0
+            ? 'Lo recibido no alcanza.'
+            : '';
+
+  // Lo que debe el cliente, bien visible (y cómo queda si se le fía esta venta). Rojo si queda debiendo, verde si no.
+  const owes = client ? (
+    <p className={`owes-line${overLimit || (fiado ? client.balanceCents + total : client.balanceCents) > 0 ? '' : ' good'}`}>
+      <CreditPreview client={client} amountCents={fiado && total > 0 ? total : undefined} what="esta venta" />
+    </p>
+  ) : null;
 
   return (
     <Modal
-      title={`Cobrar ${money(total)}`}
+      title={`${fiado ? 'Fiar' : 'Cobrar'} ${money(total)}`}
       onClose={onClose}
       footer={
         <>
@@ -332,31 +360,67 @@ function Checkout({ subtotal, onClose, onPay }: { subtotal: number; onClose: () 
             disabled={busy || !!problem}
             onClick={async () => {
               setBusy(true);
-              await onPay({ payment, clientId: client?.id, clientName: client ? undefined : name.trim() || undefined, discountCents });
+              // Fiado a alguien que no es un cliente registrado: siempre pregunta (¿es uno de estos parecidos?, ¿cliente nuevo?).
+              let target: CreditTarget | null = client ? { client } : null;
+              if (fiado && !client) {
+                target = await resolveClient(name, total);
+                if (!target) return setBusy(false);
+                if ('client' in target) {
+                  setName(target.client.name);
+                  // Si se pasa de su límite, no se fía: la línea de lo que debe lo dice y el botón se apaga.
+                  if (passesCreditLimit(target.client, total)) return setBusy(false);
+                }
+              }
+              await onPay({
+                payment,
+                clientId: target && 'client' in target ? target.client.id : undefined,
+                newClientName: target && 'newClientName' in target ? target.newClientName : undefined,
+                clientName: target ? undefined : name.trim() || undefined,
+                discountCents,
+              });
               setBusy(false);
             }}
           >
-            <Icon name="check" /> Cobrar {money(total)}
+            <Icon name="check" /> {fiado ? 'Fiar' : 'Cobrar'} {money(total)}
           </button>
         </>
       }
     >
-      <Segmented value={payment} onChange={setPayment} options={(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map(p => ({ value: p, label: PAYMENT_LABELS[p] }))} />
+      <Segmented
+        className="pay-tabs"
+        value={payment}
+        onChange={setPayment}
+        options={(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map(p => ({ value: p, label: PAYMENT_LABELS[p] }))}
+      />
       <div className="row2">
-        <Field label="Cliente (opcional)" hint={client ? `Debe ${money(client.balanceCents)}` : undefined}>
+        <Field
+          className={fiado ? 'full' : ''}
+          label={fiado ? 'Cliente (a quién se le fía)' : 'Cliente (opcional)'}
+          hint={
+            !client && fiado && name.trim()
+              ? showsSuggestions(name, clients)
+                ? 'Si es uno de estos clientes, tócalo. Si no, al fiar te pregunta si registras el nombre nuevo.'
+                : 'Nombre nuevo: al fiar te pregunta si lo registras como cliente.'
+              : undefined
+          }
+        >
           {id => (
             <>
-              <input id={id} list="sale-clients" autoComplete="off" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
+              <input id={id} list="sale-clients" autoComplete="off" autoCapitalize="words" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
               <datalist id="sale-clients">
-                {clients?.map(c => (
-                  <option key={c.id} value={c.name} />
-                ))}
+                {clients
+                  ?.filter(c => c.active || c.balanceCents > 0)
+                  .map(c => (
+                    <option key={c.id} value={c.name} label={balanceLabel(c.balanceCents, money)} />
+                  ))}
               </datalist>
+              <ClientSuggestions name={name} clients={clients} onPick={c => setName(c.name)} />
             </>
           )}
         </Field>
         <Field label="Descuento a toda la venta">{id => <MoneyInput id={id} value={discount} onChange={setDiscount} currency={settings.currency} />}</Field>
       </div>
+      {owes}
       {payment === 'cash' && (
         <div className="row2">
           <Field label="Recibido">{id => <MoneyInput id={id} value={received} onChange={setReceived} currency={settings.currency} />}</Field>
@@ -367,14 +431,16 @@ function Checkout({ subtotal, onClose, onPay }: { subtotal: number; onClose: () 
         </div>
       )}
       {problem && <p className="error-text">{problem}</p>}
+      {prompt}
     </Modal>
   );
 }
 
+
 export function ReceiptModal({ sale, onClose, children }: { sale: Sale; onClose: () => void; children?: ReactNode }) {
   const { settings } = useSession();
   const client = useLiveQuery(() => (sale.clientId ? db.clients.get(sale.clientId) : undefined), [sale.clientId]);
-  const text = receiptText(sale, settings);
+  const text = receiptText(sale, settings, client?.balanceCents);
   return (
     <Modal
       title={`Recibo #${receiptNumber(sale)}`}

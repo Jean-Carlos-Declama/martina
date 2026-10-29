@@ -22,7 +22,8 @@ export function Home({ go, goDebts }: { go: (screen: Screen) => void; goDebts: (
   const alerts = useLiveQuery(() => stockAlerts(db), []);
   const debt = useLiveQuery(async () => {
     const clients = await db.clients.filter(c => c.balanceCents > 0).toArray();
-    return { count: clients.length, cents: clients.reduce((sum, c) => sum + c.balanceCents, 0) };
+    clients.sort((a, b) => b.balanceCents - a.balanceCents || a.name.localeCompare(b.name, 'es'));
+    return { count: clients.length, cents: clients.reduce((sum, c) => sum + c.balanceCents, 0), top: clients.slice(0, 3) };
   }, []);
   // Vinculado, la nube ya guarda copia: el aviso de respaldo es para cuando todo vive solo en este equipo.
   const backupOld = !isLinked() && (!settings.lastBackupAt || Date.now() - Date.parse(settings.lastBackupAt) > WEEK);
@@ -52,8 +53,32 @@ export function Home({ go, goDebts }: { go: (screen: Screen) => void; goDebts: (
           <Icon name="alert" />
           <span>
             {settings.lastBackupAt ? 'Hace más de una semana que no se hace un respaldo.' : 'Todavía no se ha hecho ningún respaldo.'} Los datos viven solo en
-            este iPad: toca aquí para guardar una copia.
+            este equipo: toca aquí para guardar una copia.
           </span>
+        </button>
+      )}
+
+      {/* Lo que deben todos los clientes juntos (fiado de la tienda y de la lotería, menos lo que han abonado), arriba
+          para que se vea sin bajar también en el teléfono; con los que más deben. */}
+      {debt && (
+        <button className="card card-button" onClick={goDebts}>
+          <Stat
+            label="Pendiente por cobrar"
+            value={money(debt.cents)}
+            tone={debt.cents > 0 ? 'bad' : 'plain'}
+            big
+            sub={debt.cents > 0 ? `${plural(debt.count, 'cliente debe', 'clientes deben')} · toca para ver quiénes y abonar` : 'nadie debe'}
+          />
+          {debt.top.length > 0 && (
+            <span className="debt-top">
+              {debt.top.map(c => (
+                <span key={c.id}>
+                  {c.name} <strong className="bad-text">{money(c.balanceCents)}</strong>
+                </span>
+              ))}
+              {debt.count > debt.top.length && <span className="muted">y {debt.count - debt.top.length} más</span>}
+            </span>
+          )}
         </button>
       )}
 
@@ -92,19 +117,6 @@ export function Home({ go, goDebts }: { go: (screen: Screen) => void; goDebts: (
           <p className="muted small-text">Lo más vendido hoy: {store.top.map(t => `${t.name} (${formatQty(t.quantity)})`).join(', ')}</p>
         )}
       </section>
-
-      {/* Lo que deben todos los clientes juntos (fiado de la tienda y de la lotería, menos lo que han abonado). */}
-      {debt && (
-        <button className="card card-button" onClick={goDebts}>
-          <Stat
-            label="Pendiente por cobrar"
-            value={money(debt.cents)}
-            tone={debt.cents > 0 ? 'bad' : 'plain'}
-            big
-            sub={debt.cents > 0 ? `${plural(debt.count, 'cliente debe', 'clientes deben')} · toca para ver quiénes y abonar` : 'nadie debe'}
-          />
-        </button>
-      )}
 
       {alerts && (alerts.out.length > 0 || alerts.low.length > 0) && (
         <section className="card">

@@ -1,7 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import { db } from '../../db/database';
 import type { Client, LotteryEntry, Prize } from '../../db/types';
+import { exactClient } from '../../domain/clients';
 import { dayKeyOf, newId } from '../../domain/common';
 import {
   addLotterySale,
@@ -16,13 +17,18 @@ import {
   voidPrize,
 } from '../../domain/lottery';
 import { normalize } from '../../domain/products';
+import { passesCreditLimit } from '../../domain/credit';
+import { balanceTone, ClientSuggestions, CreditPreview, showsSuggestions, useCreditClient } from '../clientPick';
 import { useSession, useUi } from '../context';
-import { dayLabel, formatTime, moneyField, parseMoney, plural, shiftDay } from '../format';
+import { balanceLabel, dayLabel, formatTime, moneyField, parseMoney, plural, shiftDay } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
 import { lotteryDayText, openWhatsApp, shareText } from '../share';
 
 const QUICK_AMOUNTS = [25, 50, 100, 200, 500];
+
+// La ficha del cliente (su cuenta, abonar) se abre encima de la Lotería al tocar su nombre; se carga cuando hace falta.
+const ClientSheet = lazy(() => import('./Clients').then(m => ({ default: m.ClientSheet })));
 
 type Play = LotteryEntry & { kind: 'play' };
 type Win = Prize & { kind: 'prize' };
@@ -45,6 +51,8 @@ export function Lottery() {
   const [dayKey, setDayKey] = useState(today);
   const [editing, setEditing] = useState<{ entry: Entry; ownerId: string } | null>(null);
   const report = useLiveQuery(() => computeDay(db, dayKey), [dayKey]);
+  const clientOf = useClientOf();
+  const [viewingClient, setViewingClient] = useState<string | null>(null);
   const entries = useLiveQuery(async () => {
     const plays: Play[] = (await db.lottery.where('dayKey').equals(dayKey).toArray()).map(e => ({ ...e, kind: 'play' }));
     const prizes: Win[] = (await db.prizes.where('dayKey').equals(dayKey).toArray()).map(p => ({ ...p, kind: 'prize' }));
@@ -61,9 +69,14 @@ export function Lottery() {
   const voidEntry = async (entry: Entry) => {
     const owner = await requireOwner('Anular: autorización de la dueña');
     if (!owner) return;
+    let message = `${entry.clientName}: ${money(entry.amountCents)}`;
+    // Una jugada fiada sale de la cuenta del cliente: que se vea cómo queda.
+    const client = entry.kind === 'play' && entry.credit && entry.clientId ? await db.clients.get(entry.clientId) : undefined;
+    if (client)
+      message += `\nEra fiada: se le quita de su cuenta. ${client.name}: ahora ${balanceLabel(client.balanceCents, money)}; después ${balanceLabel(client.balanceCents - entry.amountCents, money)}.`;
     const reason = await askText({
       title: entry.kind === 'play' ? 'Anular jugada' : 'Anular premio',
-      message: `${entry.clientName}: ${money(entry.amountCents)}`,
+      message,
       label: '¿Por qué se anula?',
       okText: 'Anular',
       danger: true,
@@ -79,7 +92,7 @@ export function Lottery() {
     const deliver = report.totals.deliverCents;
     const ok = await confirm({
       title: `Cerrar ${dayLabel(dayKey, false)}`,
-      message: `Venta: ${money(report.totals.salesCents)}\nComisión: ${money(report.totals.commissionCents)}\nPremios: ${money(report.totals.prizesCents)}\n${deliver < 0 ? 'Faltante' : 'A entregar'}: ${money(deliver)}\n\nDespués de cerrar ya no se puede anotar ni anular nada de este día.`,
+      message: `Venta: ${money(report.totals.salesCents)}\nComisión: ${money(report.totals.commissionCents)}\nPremios: ${money(report.totals.prizesCents)}\n${deliver < 0 ? 'Faltante' : 'A entregar'}: ${money(deliver)}${report.creditCents > 0 ? `\n(incluye ${money(report.creditCents)} fiado, por cobrar)` : ''}\n\nDespués de cerrar ya no se puede anotar ni anular nada de este día.`,
       okText: 'Cerrar el día',
     });
     if (ok) await run(() => closeDay(db, dayKey, owner.id), 'Día cerrado');
@@ -194,34 +207,72 @@ export function Lottery() {
         <h2>Clientes del día</h2>
         {report && report.clients.length > 0 ? (
           <div className="table-wrap">
-            <table className="table">
+            {/* En el teléfono se esconden las columnas de "cuántas veces" y la cantidad va junto al monto: así cabe sin deslizar. */}
+            <table className="table day-clients">
               <thead>
                 <tr>
                   <th>Cliente</th>
-                  <th className="num">Jugó</th>
+                  <th className="num count">Jugó</th>
                   <th className="num">Monto</th>
-                  <th className="num">Premios</th>
-                  <th className="num">Se sacó</th>
+                  <th className="num count">Premios</th>
+                  <th className="num won">Se sacó</th>
                 </tr>
               </thead>
               <tbody>
-                {report.clients.map(c => (
-                  <tr key={c.name}>
-                    <td>{c.name}</td>
-                    <td className="num">{c.purchases || ''}</td>
-                    <td className="num">{c.purchasesCents ? money(c.purchasesCents) : ''}</td>
-                    <td className="num">{c.prizes || ''}</td>
-                    <td className="num bad-text">{c.prizesCents ? money(c.prizesCents) : ''}</td>
-                  </tr>
-                ))}
+                {report.clients.map(c => {
+                  const client = clientOf(c);
+                  const balance = client?.balanceCents ?? 0;
+                  // Lo que debe (o tiene a favor) hoy; en un día anterior se aclara que es lo de hoy.
+                  const owes = balance !== 0 && (
+                    <small className={`owes ${balanceTone(balance)}`}>
+                      {balance > 0 ? 'debe' : 'a favor'}
+                      {isToday ? '' : ' hoy'} {money(Math.abs(balance))}
+                    </small>
+                  );
+                  return (
+                    <tr key={c.name}>
+                      <td>
+                        {client ? (
+                          // Tocar el nombre abre su cuenta (abonar, ver lo que debe) sin salir de la Lotería.
+                          <button type="button" className="cell-link" onClick={() => setViewingClient(client.id)}>
+                            <span className="cell-link-name">{c.name}</span>
+                            {owes}
+                          </button>
+                        ) : (
+                          c.name
+                        )}
+                      </td>
+                      <td className="num count">{c.purchases || ''}</td>
+                      <td className="num">
+                        {c.purchasesCents ? money(c.purchasesCents) : ''}
+                        {c.purchases > 1 && <small className="count-inline"> ({c.purchases})</small>}
+                        {c.creditCents > 0 && <small className="owes">fiado {money(c.creditCents)}</small>}
+                        {c.prizesCents > 0 && (
+                          <small className="prize-inline">
+                            premio {money(c.prizesCents)}
+                            {c.prizes > 1 ? ` (${c.prizes})` : ''}
+                          </small>
+                        )}
+                      </td>
+                      <td className="num count">{c.prizes || ''}</td>
+                      <td className="num bad-text won">
+                        {c.prizesCents ? money(c.prizesCents) : ''}
+                        {c.prizes > 1 && <small className="count-inline"> ({c.prizes})</small>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr>
                   <th>Total</th>
-                  <th className="num">{report.totals.salesCount}</th>
-                  <th className="num">{money(report.totals.salesCents)}</th>
-                  <th className="num">{report.totals.prizesCount}</th>
-                  <th className="num">{money(report.totals.prizesCents)}</th>
+                  <th className="num count">{report.totals.salesCount}</th>
+                  <th className="num">
+                    {money(report.totals.salesCents)}
+                    {report.totals.prizesCents > 0 && <small className="prize-inline">premios {money(report.totals.prizesCents)}</small>}
+                  </th>
+                  <th className="num count">{report.totals.prizesCount}</th>
+                  <th className="num won">{money(report.totals.prizesCents)}</th>
                 </tr>
               </tfoot>
             </table>
@@ -230,7 +281,7 @@ export function Lottery() {
           <Empty icon="ticket" text="Todavía no hay nada anotado este día." />
         )}
         {report && report.byLottery.length > 1 && (
-          <ul className="chips">
+          <ul className="chips lottery-chips">
             {report.byLottery.map(l => (
               <li key={l.name} className="chip">
                 {l.name}: venta {money(l.salesCents)} · premios {money(l.prizesCents)}
@@ -242,11 +293,16 @@ export function Lottery() {
 
       {entries && (
         <div className="two-cols">
-          <EntryList title="Premios pagados" empty="No se ha pagado ningún premio." items={entries.prizes} prizes editable={editable} onEdit={startEdit} onVoid={voidEntry} />
-          <EntryList title="Jugadas" empty="No hay jugadas." items={entries.plays} editable={editable} onEdit={startEdit} onVoid={voidEntry} />
+          <EntryList title="Premios pagados" empty="No se ha pagado ningún premio." items={entries.prizes} prizes editable={editable} clientOf={clientOf} onEdit={startEdit} onVoid={voidEntry} />
+          <EntryList title="Jugadas" empty="No hay jugadas." items={entries.plays} editable={editable} clientOf={clientOf} onEdit={startEdit} onVoid={voidEntry} />
         </div>
       )}
       {editing && <EditEntryModal entry={editing.entry} ownerId={editing.ownerId} onClose={() => setEditing(null)} />}
+      {viewingClient && (
+        <Suspense fallback={null}>
+          <ClientSheet id={viewingClient} onClose={() => setViewingClient(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -258,6 +314,7 @@ function EntryList(props: {
   items: Entry[];
   prizes?: boolean;
   editable: boolean;
+  clientOf: (row: { clientId?: string; name: string }) => Client | undefined;
   onEdit: (entry: Entry) => void;
   onVoid: (entry: Entry) => void;
 }) {
@@ -278,26 +335,29 @@ function EntryList(props: {
       ) : (
         <ul className="list">
           {props.items.map(e => (
-            <li key={e.id} className={e.status === 'void' ? 'voided' : ''}>
+            <li key={e.id} className={`entry-row ${e.status === 'void' ? 'voided' : ''}`}>
               <span className="grow">
                 <strong>{e.clientName}</strong>
                 <small className="muted">
                   {formatTime(e.date)}
                   {e.lottery ? ` · ${e.lottery}` : ''}
-                  {e.kind === 'play' && e.credit ? ' · fiado' : ''}
                   {e.status === 'void' ? ' · ANULADO' : ''}
                 </small>
+                {e.status === 'done' && <EntryOwes balance={props.clientOf({ clientId: e.clientId, name: e.clientName })?.balanceCents ?? 0} />}
               </span>
-              <span className={`amount ${isPrize ? 'bad-text' : ''}`}>{money(e.amountCents)}</span>
+              <span className="right">
+                <span className={`amount ${isPrize || (e.kind === 'play' && e.credit) ? 'bad-text' : ''}`}>{money(e.amountCents)}</span>
+                {e.kind === 'play' && e.credit && <span className="tag out">Fiado</span>}
+              </span>
               {props.editable && e.status === 'done' && (
-                <>
+                <span className="row-tools">
                   <button className="icon-btn" onClick={() => props.onEdit(e)} aria-label="Corregir">
                     <Icon name="edit" size={20} />
                   </button>
                   <button className="icon-btn" onClick={() => props.onVoid(e)} aria-label="Anular">
                     <Icon name="trash" size={20} />
                   </button>
-                </>
+                </span>
               )}
             </li>
           ))}
@@ -320,7 +380,23 @@ function useNameSuggestions() {
   return { suggestions, findClient };
 }
 
-function NameField({ value, onChange, hint, listId }: { value: string; onChange: (value: string) => void; hint?: string; listId: string }) {
+/** El cliente de una fila del cuadre (por su ficha, o por su nombre si se anotó sin escogerlo de la lista). */
+function useClientOf() {
+  const clients = useLiveQuery(() => db.clients.toArray(), []);
+  return useMemo(() => {
+    const byId = new Map((clients ?? []).map(c => [c.id, c]));
+    const byName = new Map((clients ?? []).map(c => [normalize(c.name), c]));
+    return (row: { clientId?: string; name: string }): Client | undefined => (row.clientId && byId.get(row.clientId)) || byName.get(normalize(row.name));
+  }, [clients]);
+}
+
+/** "debe RD$ X" (o "a favor") debajo del nombre en las listas de jugadas y premios. */
+function EntryOwes({ balance }: { balance: number }) {
+  const { money } = useSession();
+  return balance === 0 ? null : <small className={`owes ${balanceTone(balance)}`}>{balanceLabel(balance, money)}</small>;
+}
+
+function NameField({ value, onChange, hint, listId, extra }: { value: string; onChange: (value: string) => void; hint?: ReactNode; listId: string; extra?: ReactNode }) {
   const { suggestions } = useNameSuggestions();
   return (
     <Field label="Cliente" hint={hint}>
@@ -332,6 +408,7 @@ function NameField({ value, onChange, hint, listId }: { value: string; onChange:
               <option key={s} value={s} />
             ))}
           </datalist>
+          {extra}
         </>
       )}
     </Field>
@@ -342,7 +419,7 @@ function NameField({ value, onChange, hint, listId }: { value: string; onChange:
 function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
   const { settings, money, requireOwner } = useSession();
   const { run, toast } = useUi();
-  const { findClient } = useNameSuggestions();
+  const { resolveClient, prompt, clients } = useCreditClient();
   const [kind, setKind] = useState<'play' | 'prize'>('play');
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
@@ -350,11 +427,13 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
   const [credit, setCredit] = useState(false);
   const [requestId, setRequestId] = useState(newId);
   const [busy, setBusy] = useState(false);
-  const client = findClient(name);
+  const client = exactClient(name, clients);
+  const cents = parseMoney(amount);
   const pastDay = dayKey !== dayKeyOf();
+  const fiado = kind === 'play' && credit;
+  const overLimit = fiado && !!client && !!cents && passesCreditLimit(client, cents);
 
   const submit = async () => {
-    const cents = parseMoney(amount);
     if (!cents) return toast('Escribe cuánto.', 'error');
     if (!name.trim()) return toast('Escribe el nombre del cliente.', 'error');
     let byUser = userId;
@@ -364,17 +443,48 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
       byUser = owner.id;
     }
     setBusy(true);
-    const base = { clientId: client?.id, clientName: name, amountCents: cents, lottery: lottery || undefined, userId: byUser, requestId, dayKey };
-    const done = await run(() => (kind === 'play' ? addLotterySale(db, { ...base, credit: credit && !!client }) : addPrize(db, base)));
+    // Fiado a alguien que no es un cliente registrado: siempre pregunta (¿es uno de estos parecidos?, ¿cliente nuevo?).
+    let clientId = client?.id;
+    let newClientName: string | undefined;
+    if (fiado && !client) {
+      const target = await resolveClient(name, cents);
+      if (!target) return setBusy(false);
+      if ('client' in target) {
+        setName(target.client.name);
+        // Si se pasa de su límite, no se anota: la pista lo dice y el botón se apaga.
+        if (passesCreditLimit(target.client, cents)) return setBusy(false);
+        clientId = target.client.id;
+      } else newClientName = target.newClientName;
+    }
+    const base = { clientId, clientName: name, amountCents: cents, lottery: lottery || undefined, userId: byUser, requestId, dayKey };
+    const done = await run(() => (kind === 'play' ? addLotterySale(db, { ...base, credit, newClientName }) : addPrize(db, base)));
     setBusy(false);
     if (done) {
-      toast(`${kind === 'play' ? 'Jugada' : 'Premio'} de ${done.clientName}: ${money(done.amountCents)}`);
+      toast(`${kind === 'play' ? 'Jugada' : 'Premio'} de ${done.clientName}: ${money(done.amountCents)}${newClientName ? ' (se registró como cliente)' : ''}`);
       setName('');
       setAmount('');
       setCredit(false);
       setRequestId(newId());
     }
   };
+
+  const hint = client ? (
+    <>
+      Cliente registrado · <CreditPreview client={client} amountCents={fiado && cents ? cents : undefined} what="esta jugada" />
+    </>
+  ) : showsSuggestions(name, clients) ? (
+    fiado ? (
+      'Si es uno de estos clientes, tócalo. Si no, al fiar te pregunta si registras el nombre nuevo.'
+    ) : (
+      'Si es uno de estos clientes, tócalo (si no, se anota con este nombre).'
+    )
+  ) : name.trim() ? (
+    fiado ? (
+      'Nombre nuevo: al fiar te pregunta si lo registras como cliente.'
+    ) : (
+      'Nombre nuevo (se anota igual)'
+    )
+  ) : undefined;
 
   return (
     <section className="card entry-form">
@@ -393,8 +503,14 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
           void submit();
         }}
       >
-        <div className="row3">
-          <NameField value={name} onChange={setName} listId="lottery-names" hint={client ? 'Cliente registrado' : name.trim() ? 'Nombre nuevo (se anota igual)' : undefined} />
+        <div className={settings.lotteries.length > 0 ? 'row3' : 'row2'}>
+          <NameField
+            value={name}
+            onChange={setName}
+            listId="lottery-names"
+            hint={hint}
+            extra={<ClientSuggestions name={name} clients={clients} onPick={c => setName(c.name)} />}
+          />
           <Field label={kind === 'play' ? 'Cuánto jugó' : 'Cuánto se sacó'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} currency={settings.currency} />}</Field>
           {settings.lotteries.length > 0 && (
             <Field label="Lotería">
@@ -416,15 +532,16 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
             </button>
           ))}
           {kind === 'play' && (
-            <label className={`check${client ? '' : ' disabled'}`} title={client ? '' : 'Solo a clientes registrados'}>
-              <input type="checkbox" checked={credit && !!client} disabled={!client} onChange={e => setCredit(e.target.checked)} /> Fiado
+            <label className="check">
+              <input type="checkbox" checked={credit} onChange={e => setCredit(e.target.checked)} /> Fiado
             </label>
           )}
-          <button className={`btn ${kind === 'play' ? 'primary' : 'danger'} grow`} type="submit" disabled={busy}>
+          <button className={`btn ${kind === 'play' ? 'primary' : 'danger'} grow`} type="submit" disabled={busy || overLimit}>
             <Icon name={kind === 'play' ? 'plus' : 'prize'} /> {kind === 'play' ? 'Anotar jugada' : 'Pagar premio'}
           </button>
         </div>
       </form>
+      {prompt}
     </section>
   );
 }
@@ -439,9 +556,13 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
   const [lottery, setLottery] = useState(entry.lottery ?? '');
   const isPlay = entry.kind === 'play';
   const lockedClient = isPlay && entry.credit;
+  // Jugada fiada: corregir el monto también cambia lo que debe el cliente.
+  const creditClient = useLiveQuery(() => (lockedClient && entry.clientId ? db.clients.get(entry.clientId) : undefined), [lockedClient, entry.clientId]);
+  const cents = parseMoney(amount);
+  // Cómo queda la cuenta del cliente con el monto corregido (puede quedarle saldo a favor).
+  const after = creditClient && cents ? creditClient.balanceCents + cents - entry.amountCents : null;
 
   const save = async () => {
-    const cents = parseMoney(amount);
     if (!cents) return;
     const client = lockedClient ? undefined : findClient(name);
     const changes = { clientId: lockedClient ? entry.clientId : client?.id, clientName: lockedClient ? entry.clientName : name, amountCents: cents, lottery: lottery || undefined };
@@ -462,7 +583,7 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
           <button className="btn" onClick={onClose}>
             Cancelar
           </button>
-          <button className="btn primary" disabled={!parseMoney(amount) || !name.trim()} onClick={() => void save()}>
+          <button className="btn primary" disabled={!cents || !name.trim()} onClick={() => void save()}>
             Guardar
           </button>
         </>
@@ -471,6 +592,26 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
       <p className="muted">
         Antes: {entry.clientName} · {money(entry.amountCents)}. Al guardar, el cuadre del día se recalcula solo.
       </p>
+      {creditClient && (
+        <div className="stats">
+          <Stat
+            label={creditClient.balanceCents < 0 ? `${creditClient.name} tiene a favor` : `${creditClient.name} debe ahora`}
+            value={money(Math.abs(creditClient.balanceCents))}
+            tone={creditClient.balanceCents > 0 ? 'bad' : creditClient.balanceCents < 0 ? 'good' : 'plain'}
+          />
+          <Stat
+            label={after !== null && after < 0 ? 'Con el cambio le queda a favor' : 'Con el cambio debe'}
+            value={after === null ? '—' : money(Math.abs(after))}
+            tone={after === null || after === 0 ? 'plain' : after > 0 ? 'bad' : 'good'}
+            big
+          />
+        </div>
+      )}
+      {creditClient?.creditLimitCents && after !== null && cents && cents > entry.amountCents && after > creditClient.creditLimitCents ? (
+        <p className="warn-text">
+          Con este cambio {creditClient.name} se pasa de su límite de fiado ({money(creditClient.creditLimitCents)}).
+        </p>
+      ) : null}
       <div className="row2">
         {lockedClient ? (
           <Field label="Cliente" hint="Jugada fiada: para cambiar el cliente, anúlala y anótala otra vez">

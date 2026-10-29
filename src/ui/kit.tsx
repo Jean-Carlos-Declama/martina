@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, type IconName } from './icons';
 import { useBlobUrl } from './photo';
 
@@ -6,13 +6,30 @@ import { useBlobUrl } from './photo';
 
 export function Modal(props: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const { onClose } = props;
+  const overlay = useRef<HTMLDivElement>(null);
+  const pressed = useRef(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    // Escape cierra solo la ventana de arriba: si hay una encima de otra (ej. "¿A quién se le fía?" sobre Cobrar), la de
+    // abajo se queda. La que se cierra marca la tecla, así ninguna otra la vuelve a usar.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || overlay.current !== [...document.querySelectorAll('.overlay')].pop()) return;
+      e.preventDefault();
+      onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // Tocar lo oscuro cierra la ventana al soltar el dedo (con el clic), así el toque no le llega a lo que está debajo.
   return (
-    <div className="overlay" onPointerDown={e => e.target === e.currentTarget && props.onClose()}>
+    <div
+      className="overlay"
+      ref={overlay}
+      onPointerDown={e => (pressed.current = e.target === e.currentTarget)}
+      onClick={e => {
+        if (pressed.current && e.target === e.currentTarget) props.onClose();
+        pressed.current = false;
+      }}
+    >
       <div className={`modal${props.wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={props.title}>
         <header className="modal-head">
           <h2>{props.title}</h2>
@@ -56,9 +73,9 @@ export function MoneyInput(props: { id?: string; value: string; onChange: (text:
   );
 }
 
-export function Segmented<T extends string>(props: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) {
+export function Segmented<T extends string>(props: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void; className?: string }) {
   return (
-    <div className="segmented" role="tablist">
+    <div className={`segmented ${props.className ?? ''}`} role="tablist">
       {props.options.map(o => (
         <button key={o.value} role="tab" aria-selected={props.value === o.value} className={props.value === o.value ? 'on' : ''} onClick={() => props.onChange(o.value)}>
           {o.label}
@@ -70,7 +87,7 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
 
 export function Stat(props: { label: string; value: string; tone?: 'good' | 'bad' | 'accent' | 'plain'; sub?: string; big?: boolean }) {
   return (
-    <div className={`stat ${props.tone ?? 'plain'}${props.big ? ' big' : ''}`}>
+    <div className={`stat ${props.tone ?? 'plain'}${props.big ? ' big' : ''}`} style={{ '--len': props.value.length } as CSSProperties}>
       <span className="stat-label">{props.label}</span>
       <strong className="stat-value">{props.value}</strong>
       {props.sub && <span className="stat-sub">{props.sub}</span>}

@@ -115,7 +115,7 @@ export function LinkFromSetup() {
   return (
     <>
       <button type="button" className="btn block" onClick={() => setOpen(true)}>
-        <Icon name="camera" /> Ya uso Martina en otro equipo: escanear su QR
+        <Icon name="camera" /> Ya uso Martina en otro equipo: escanear su&nbsp;QR
       </button>
       {open && (
         <LinkCodeModal
@@ -202,7 +202,7 @@ export function DevicesSection() {
               </button>
             )}
             <button className="btn" onClick={() => setMode('link')}>
-              <Icon name="camera" /> Vincular a otro equipo (escanear su QR)
+              <Icon name="camera" /> Vincular a otro equipo (escanear su&nbsp;QR)
             </button>
           </div>
         </>

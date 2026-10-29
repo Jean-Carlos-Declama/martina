@@ -12,6 +12,10 @@ interface ConfirmOptions {
   title: string;
   message?: string;
   okText?: string;
+  /** Texto del otro botón (si no, "Cancelar"). */
+  cancelText?: string;
+  /** Solo un botón (un aviso que hay que leer, no una pregunta). */
+  noCancel?: boolean;
   danger?: boolean;
 }
 interface TextOptions extends ConfirmOptions {
@@ -119,9 +123,11 @@ function ConfirmDialog({ dialog, close }: { dialog: Extract<Dialog, { kind: 'con
       onClose={() => answer(false)}
       footer={
         <>
-          <button className="btn" onClick={() => answer(false)}>
-            Cancelar
-          </button>
+          {!dialog.noCancel && (
+            <button className="btn" onClick={() => answer(false)}>
+              {dialog.cancelText ?? 'Cancelar'}
+            </button>
+          )}
           <button className={`btn ${dialog.danger ? 'danger' : 'primary'}`} onClick={() => answer(true)} autoFocus>
             {dialog.okText ?? 'Sí'}
           </button>

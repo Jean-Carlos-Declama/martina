@@ -4,6 +4,11 @@ import type { CreditEntry, Id } from '../db/types';
 import { audit } from './audit';
 import { BusinessError, dayKeyOf, newId, nowIso } from './common';
 
+/** ¿Fiarle esto lo pasa de su límite de fiado? La misma regla para avisar en pantalla y para no dejar guardar. */
+export function passesCreditLimit(client: { balanceCents: number; creditLimitCents?: number }, amountCents: number): boolean {
+  return !!client.creditLimitCents && client.balanceCents + amountCents > client.creditLimitCents;
+}
+
 /**
  * Mueve la cuenta de fiado de un cliente: + aumenta lo que debe (fiado), - lo baja (abono, anulación). Tiene que
  * llamarse dentro de una transacción con las tablas clients y credit.
@@ -21,12 +26,12 @@ export async function addCredit(
   const client = await database.clients.get(clientId);
   if (!client) throw new BusinessError('El cliente no existe.');
   const balance = client.balanceCents + amountCents;
-  if ((kind === 'sale' || kind === 'lottery') && client.creditLimitCents && balance > client.creditLimitCents)
-    throw new BusinessError(`${client.name} pasaría su límite de fiado.`);
+  if ((kind === 'sale' || kind === 'lottery') && passesCreditLimit(client, amountCents)) throw new BusinessError(`${client.name} pasaría su límite de fiado.`);
   const entry: CreditEntry = { id: newId(), clientId, date, kind, amountCents, balanceAfterCents: balance, saleId, userId, note };
   await database.credit.add(entry);
   // Súmale/réstale (no "ponle X"): así dos equipos fiando o cobrando a la vez no se pisan al sincronizar.
-  await database.clients.update(clientId, { balanceCents: add(amountCents) });
+  // Un cliente archivado que vuelve a deber se reactiva: nunca queda escondido alguien que debe.
+  await database.clients.update(clientId, { balanceCents: add(amountCents), ...(balance > 0 && !client.active ? { active: true } : {}) });
   return entry;
 }
 
@@ -75,6 +80,11 @@ export async function addCharge(database: MartinaDb, clientId: Id, amountCents: 
   });
 }
 
+/** Si un cliente archivado queda debiendo con este cambio, se reactiva (para que salga en la lista de los que deben). */
+function reactivate(client: { active: boolean; balanceCents: number }, change: number): { active?: true } {
+  return !client.active && client.balanceCents + change > 0 ? { active: true } : {};
+}
+
 /** Solo los abonos y las deudas anotadas a mano se corrigen aquí; lo que viene de una venta o jugada, desde allá. */
 function checkManual(entry: CreditEntry | undefined): asserts entry is CreditEntry {
   if (!entry || entry.status === 'void') throw new BusinessError('Ese movimiento no existe o ya está anulado.');
@@ -84,7 +94,8 @@ function checkManual(entry: CreditEntry | undefined): asserts entry is CreditEnt
 
 /**
  * Corrige un abono o una deuda a mano (monto, fecha o nota), de cualquier fecha: lo que debe el cliente se
- * recalcula solo. No deja que quede debiendo menos de cero.
+ * recalcula solo. Un cambio que baja lo que debe no lo puede dejar en menos de cero (si ya tenía saldo a favor, igual
+ * se le puede corregir la fecha o la nota, o un cambio que lo acerque a cero).
  */
 export async function updateCreditEntry(
   database: MartinaDb,
@@ -103,11 +114,11 @@ export async function updateCreditEntry(
     const sign = entry.kind === 'payment' ? -1 : 1;
     const newAmount = sign * Math.round(changes.amountCents);
     const diff = newAmount - entry.amountCents;
-    if (client.balanceCents + diff < 0) throw new BusinessError(`Así ${client.name} quedaría debiendo menos de cero: revisa el monto.`);
+    if (diff < 0 && client.balanceCents + diff < 0) throw new BusinessError(`Así ${client.name} quedaría debiendo menos de cero: revisa el monto.`);
     // Si la fecha no cambió de día, se queda la hora original.
     const keepDate = !changes.dayKey || changes.dayKey === dayKeyOf(new Date(entry.date));
     await database.credit.update(entryId, { amountCents: newAmount, date: keepDate ? entry.date : date, note: changes.note?.trim() || undefined });
-    if (diff !== 0) await database.clients.update(entry.clientId, { balanceCents: add(diff) });
+    if (diff !== 0) await database.clients.update(entry.clientId, { balanceCents: add(diff), ...reactivate(client, diff) });
     await audit(database, userId, 'corregir', 'cuenta', entry.clientId, `${entry.kind === 'payment' ? 'abono' : 'deuda'} ${Math.abs(entry.amountCents) / 100} → ${changes.amountCents / 100}`);
   });
 }
@@ -120,9 +131,10 @@ export async function voidCreditEntry(database: MartinaDb, entryId: Id, userId: 
     checkManual(entry);
     const client = await database.clients.get(entry.clientId);
     if (!client) throw new BusinessError('El cliente no existe.');
-    if (client.balanceCents - entry.amountCents < 0) throw new BusinessError(`Si se anula, ${client.name} quedaría debiendo menos de cero.`);
+    const change = -entry.amountCents;
+    if (change < 0 && client.balanceCents + change < 0) throw new BusinessError(`Si se anula, ${client.name} quedaría debiendo menos de cero.`);
     await database.credit.update(entryId, { status: 'void' });
-    await database.clients.update(entry.clientId, { balanceCents: add(-entry.amountCents) });
+    await database.clients.update(entry.clientId, { balanceCents: add(change), ...reactivate(client, change) });
     await audit(database, userId, 'anular', 'cuenta', entry.clientId, `${entry.kind === 'payment' ? 'abono' : 'deuda'} ${Math.abs(entry.amountCents) / 100}: ${reason.trim()}`);
   });
 }

@@ -5,7 +5,8 @@ import { dayLabel, formatDateTime, formatMoney, formatQty, PAYMENT_LABELS } from
 
 // Textos para mandar por WhatsApp (recibo, cuadre de lotería, recordatorio de fiado) y cómo abrirlo.
 
-export function receiptText(sale: Sale, settings: Settings): string {
+/** El recibo. Si es fiado y se sabe cómo está la cuenta del cliente ahora, lo dice al final (así lo ve también por WhatsApp). */
+export function receiptText(sale: Sale, settings: Settings, clientBalanceCents?: number): string {
   const money = (cents: number) => formatMoney(cents, settings.currency);
   const lines = [
     `*${settings.businessName}*`,
@@ -22,6 +23,13 @@ export function receiptText(sale: Sale, settings: Settings): string {
     `*Total: ${money(sale.totalCents)}*`,
     sale.taxCents > 0 ? `ITBIS incluido: ${money(sale.taxCents)}` : '',
     `Pago: ${PAYMENT_LABELS[sale.payment]}`,
+    sale.payment === 'credit' && sale.status === 'done' && clientBalanceCents !== undefined
+      ? clientBalanceCents > 0
+        ? `*${sale.clientName ?? 'El cliente'} debe en total: ${money(clientBalanceCents)}*`
+        : clientBalanceCents < 0
+          ? `*${sale.clientName ?? 'El cliente'} tiene a favor: ${money(-clientBalanceCents)}*`
+          : `*${sale.clientName ?? 'El cliente'} queda al día (no debe nada)*`
+      : '',
     sale.status === 'void' ? '*** VENTA ANULADA ***' : '',
     '',
     settings.receiptFooter,
@@ -34,7 +42,8 @@ export function lotteryDayText(report: DayReport, settings: Settings): string {
   const t = report.totals;
   const rows = report.clients.map(c => {
     const prize = c.prizes > 0 ? ` · premio ${c.prizes}x ${money(c.prizesCents)}` : '';
-    return `${c.name}: ${c.purchases}x ${money(c.purchasesCents)}${prize}`;
+    const credit = c.creditCents > 0 ? ` (fiado ${money(c.creditCents)})` : '';
+    return `${c.name}: ${c.purchases}x ${money(c.purchasesCents)}${credit}${prize}`;
   });
   return [
     `*Lotería — ${settings.businessName}*`,
@@ -46,6 +55,7 @@ export function lotteryDayText(report: DayReport, settings: Settings): string {
     `Comisión ${t.commissionPct}%: ${money(t.commissionCents)}`,
     `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
     t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}* (los premios y la comisión pasaron la venta)` : `*A entregar: ${money(t.deliverCents)}*`,
+    report.creditCents > 0 ? `(incluye ${money(report.creditCents)} fiado, por cobrar)` : '',
     report.status === 'closed' ? '(día cerrado)' : '',
   ]
     .join('\n')

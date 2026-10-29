@@ -398,7 +398,8 @@ function ProductDetail({ id, onClose, onEdit }: { id: string; onClose: () => voi
       <h3>Historial</h3>
       {movements && movements.length > 0 ? (
         <div className="table-wrap">
-          <table className="table">
+          {/* En el teléfono cada movimiento es una tarjetita con la fecha de título. */}
+          <table className="table stack">
             <thead>
               <tr>
                 <th>Fecha</th>
@@ -412,13 +413,15 @@ function ProductDetail({ id, onClose, onEdit }: { id: string; onClose: () => voi
               {movements.map(m => (
                 <tr key={m.id}>
                   <td>{formatDateTime(m.date)}</td>
-                  <td>{MOVEMENT_LABELS[m.type]}</td>
-                  <td className={`num ${movementTone(m.type, m.quantity) === 'in' ? 'good-text' : 'bad-text'}`}>
+                  <td data-label="Qué pasó">{MOVEMENT_LABELS[m.type]}</td>
+                  <td className={`num ${movementTone(m.type, m.quantity) === 'in' ? 'good-text' : 'bad-text'}`} data-label="Cantidad">
                     {m.quantity > 0 ? '+' : ''}
                     {formatQty(m.quantity)}
                   </td>
-                  <td className="num">{formatQty(m.stockAfter)}</td>
-                  <td className="small-text">
+                  <td className="num" data-label="Quedó">
+                    {formatQty(m.stockAfter)}
+                  </td>
+                  <td className="small-text" data-label="Quién / por qué">
                     {users?.get(m.userId) ?? ''}
                     {m.reason ? ` · ${m.reason}` : ''}
                   </td>

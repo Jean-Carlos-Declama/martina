@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { db } from '../../db/database';
 import type { Client, CreditEntry } from '../../db/types';
 import { createClient, setClientActive, updateClient } from '../../domain/clients';
@@ -7,10 +7,20 @@ import { dayKeyOf } from '../../domain/common';
 import { addCharge, clientAccount, registerPayment, updateCreditEntry, voidCreditEntry, type AccountLine } from '../../domain/credit';
 import { normalize } from '../../domain/products';
 import { useSession, useUi } from '../context';
-import { formatDateTime, moneyField, parseMoney, plural, shiftDay } from '../format';
+import { formatPhone, formatWhen, moneyField, parseMoney, plural, shiftDay } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
 import { debtText, openWhatsApp } from '../share';
+
+/** Qué fue cada línea de la cuenta. Las de ajuste dicen de dónde vienen (jugada corregida o anulada, devolución). */
+function lineLabel(line: CreditEntry): { label: string; note?: string } {
+  const note = line.note?.replace(/^(Anulación|Devolución) /, '');
+  if (line.kind !== 'adjust') return { label: CREDIT_LABELS[line.kind], note: line.kind === 'saleVoid' ? note : line.note };
+  if (line.note === 'Lotería corregida') return { label: line.amountCents > 0 ? 'Jugada corregida (se le sumó)' : 'Jugada corregida (se le rebajó)' };
+  if (line.note === 'Lotería anulada') return { label: 'Jugada anulada' };
+  if (line.note?.startsWith('Devolución ')) return { label: 'Devolución', note };
+  return { label: CREDIT_LABELS.adjust, note: line.note };
+}
 
 const CREDIT_LABELS: Record<CreditEntry['kind'], string> = {
   sale: 'Fiado (tienda)',
@@ -30,15 +40,26 @@ export default function Clients({ initialFilter = 'all' }: { initialFilter?: 'al
   const [paying, setPaying] = useState<Client | null>(null);
   const clients = useLiveQuery(() => db.clients.toArray(), []);
 
-  const shown = useMemo(() => {
+  // Quién sale en cada filtro. Un cliente que debe sale SIEMPRE en "Todos" y "Deben", aunque esté archivado.
+  const inFilter = (c: Client, which: typeof filter) =>
+    which === 'archived' ? !c.active : which === 'debt' ? c.balanceCents > 0 : c.active || c.balanceCents > 0;
+  // El teléfono se busca solo por los números (así sirve "829-555", "829 555", "829555" o "+1 829-555-0101" de WhatsApp).
+  const typedDigits = search.replace(/\D/g, '');
+  const withCountry = /^\s*(\+\s*1|1[\s\-.(])/.test(search) || (typedDigits.length === 11 && typedDigits.startsWith('1'));
+  const digits = withCountry ? typedDigits.slice(1) : typedDigits;
+  const byPhone = digits.length >= 3 && !/\p{L}/u.test(search);
+  const matches = (c: Client) => {
     const needle = normalize(search);
-    return (clients ?? [])
-      .filter(c => (filter === 'archived' ? !c.active : c.active) && (filter !== 'debt' || c.balanceCents > 0))
-      .filter(c => !needle || normalize(c.name).includes(needle) || c.phone?.includes(needle))
-      .sort((a, b) => (filter === 'debt' ? b.balanceCents - a.balanceCents : a.name.localeCompare(b.name, 'es')));
-  }, [clients, search, filter]);
-  const debtors = (clients ?? []).filter(c => c.active && c.balanceCents > 0);
+    return !needle || normalize(c.name).includes(needle) || (digits.length >= 3 && !!c.phone && c.phone.replace(/\D/g, '').includes(digits));
+  };
+  const shown = (clients ?? [])
+    .filter(c => inFilter(c, filter) && matches(c))
+    .sort((a, b) => (filter === 'debt' ? b.balanceCents - a.balanceCents || a.name.localeCompare(b.name, 'es') : a.name.localeCompare(b.name, 'es')));
+  const debtors = (clients ?? []).filter(c => c.balanceCents > 0);
   const totalDebt = debtors.reduce((sum, c) => sum + c.balanceCents, 0);
+  // Si la búsqueda no encuentra a nadie en este filtro, ¿está en otro?
+  const elsewhere = shown.length === 0 && search.trim() ? (['all', 'debt', 'archived'] as const).find(f => f !== filter && (clients ?? []).some(c => inFilter(c, f) && matches(c))) : undefined;
+  const filterNames = { all: 'Todos', debt: 'Deben', archived: 'Archivados' } as const;
 
   return (
     <div className="page">
@@ -75,29 +96,58 @@ export default function Clients({ initialFilter = 'all' }: { initialFilter?: 'al
         />
       </div>
       {shown.length === 0 ? (
-        <Empty icon="users" text={clients?.length ? 'Nadie con ese filtro.' : 'Todavía no hay clientes. Los que fían o juegan seguido conviene registrarlos.'} />
+        <Empty
+          icon="users"
+          text={
+            !clients?.length
+              ? 'Todavía no hay clientes. Los que fían o juegan seguido conviene registrarlos.'
+              : elsewhere
+                ? `«${search.trim()}» no está en «${filterNames[filter]}», pero sí en «${filterNames[elsewhere]}».`
+                : search.trim()
+                  ? byPhone
+                    ? `Nadie tiene el teléfono «${search.trim()}».`
+                    : `No hay ningún cliente que se llame «${search.trim()}».`
+                  : filter === 'debt'
+                    ? 'Nadie debe nada.'
+                    : 'Nadie con ese filtro.'
+          }
+        >
+          {elsewhere && (
+            <button className="btn" onClick={() => setFilter(elsewhere)}>
+              Ver en «{filterNames[elsewhere]}»
+            </button>
+          )}
+        </Empty>
       ) : (
-        <ul className="list card">
+        <ul className="list card clients-list">
           {shown.map(c => (
-            <li key={c.id}>
+            <li key={c.id} className="client-row">
               <button className="row-button" onClick={() => setViewing(c.id)}>
                 <span className="grow">
-                  <strong>{c.name}</strong>
-                  <small className="muted">{c.phone ?? 'sin teléfono'}</small>
+                  <strong>
+                    {c.name} {!c.active && <span className="tag">archivado</span>}
+                  </strong>
+                  <small className="muted">{c.phone ? formatPhone(c.phone) : 'sin teléfono'}</small>
                 </span>
-                <span className={`amount ${c.balanceCents > 0 ? 'bad-text' : c.balanceCents < 0 ? 'good-text' : 'muted'}`}>
-                  {c.balanceCents > 0 ? `debe ${money(c.balanceCents)}` : c.balanceCents < 0 ? `a favor ${money(-c.balanceCents)}` : 'al día'}
+                {/* Lo que debe, siempre a la vista y grande (en el teléfono los botones bajan a otra línea). */}
+                <span className="debt">
+                  <small className="muted">{c.balanceCents > 0 ? 'Debe' : c.balanceCents < 0 ? 'A favor' : 'Debe'}</small>
+                  <strong className={c.balanceCents > 0 ? 'bad-text' : c.balanceCents < 0 ? 'good-text' : 'muted'}>
+                    {c.balanceCents === 0 ? 'Nada (al día)' : money(Math.abs(c.balanceCents))}
+                  </strong>
                 </span>
               </button>
-              {canEdit && c.balanceCents > 0 && (
-                <button className="btn small primary" onClick={() => setPaying(c)}>
-                  Abonar
-                </button>
-              )}
               {canEdit && (
-                <button className="icon-btn" onClick={() => setEditing(c)} aria-label={`Editar los datos de ${c.name}`} title="Editar datos">
-                  <Icon name="edit" size={20} />
-                </button>
+                <span className="row-tools">
+                  {c.balanceCents > 0 && (
+                    <button className="btn small primary" onClick={() => setPaying(c)}>
+                      Abonar
+                    </button>
+                  )}
+                  <button className="icon-btn" onClick={() => setEditing(c)} aria-label={`Editar los datos de ${c.name}`} title="Editar datos">
+                    <Icon name="edit" size={20} />
+                  </button>
+                </span>
               )}
             </li>
           ))}
@@ -123,7 +173,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   const { user, settings } = useSession();
   const { run } = useUi();
   const [name, setName] = useState(client?.name ?? '');
-  const [phone, setPhone] = useState(client?.phone ?? '');
+  const [phone, setPhone] = useState(formatPhone(client?.phone));
   const [notes, setNotes] = useState(client?.notes ?? '');
   const [limit, setLimit] = useState(moneyField(client?.creditLimitCents));
 
@@ -166,6 +216,12 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   );
 }
 
+/** La ficha de un cliente encima de otra pantalla (ej. al tocar su nombre en la Lotería): su cuenta, abonar y editar sus datos. */
+export function ClientSheet({ id, onClose }: { id: string; onClose: () => void }) {
+  const [editing, setEditing] = useState<Client | null>(null);
+  return editing ? <ClientForm client={editing} onClose={() => setEditing(null)} /> : <ClientDetail id={id} onClose={onClose} onEdit={setEditing} />;
+}
+
 type Period = 'all' | 'month' | 'last';
 
 /** El mes de una fecha (AAAA-MM) y el del mes pasado. */
@@ -179,7 +235,7 @@ function lastMonthKey(): string {
 
 function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: (client: Client) => void }) {
   const { money, settings, user, canEdit, requireOwner } = useSession();
-  const { run, askText } = useUi();
+  const { run, askText, confirm } = useUi();
   const [paying, setPaying] = useState(false);
   const [charging, setCharging] = useState(false);
   const [editingEntry, setEditingEntry] = useState<{ entry: AccountLine; ownerId: string } | null>(null);
@@ -202,6 +258,18 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
     const wanted = period === 'month' ? thisMonth : period === 'last' ? lastMonthKey() : null;
     return (account ?? []).filter(line => !wanted || monthOf(line.date) === wanted).reverse();
   }, [account, period]);
+  // Viendo un mes: lo que venía debiendo (o tenía a favor) de antes, para que cuadre con lo de arriba.
+  const carried = useMemo(() => {
+    if (period === 'all') return 0;
+    const wanted = period === 'month' ? dayKeyOf().slice(0, 7) : lastMonthKey();
+    const before = (account ?? []).filter(line => monthOf(line.date) < wanted);
+    return before.length ? before[before.length - 1].runningCents : 0;
+  }, [account, period]);
+  // Ventas y jugadas fiadas que ya se anularon (la cuenta tiene la línea que las quita): ya no hay nada que corregir.
+  const voidedOrigins = useMemo(
+    () => new Set((account ?? []).filter(l => l.kind === 'saleVoid' || (l.kind === 'adjust' && l.note === 'Lotería anulada')).map(l => l.saleId)),
+    [account],
+  );
   if (!client) return null;
 
   const startEdit = async (entry: AccountLine) => {
@@ -209,11 +277,22 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
     if (owner) setEditingEntry({ entry, ownerId: owner.id });
   };
   const cancelEntry = async (entry: AccountLine) => {
+    // Si anularla lo deja debiendo menos de cero, se dice antes (y no se pide el PIN ni el motivo para nada).
+    const change = -entry.amountCents;
+    if (change < 0 && client.balanceCents + change < 0) {
+      await confirm({
+        title: 'No se puede anular',
+        message: `Si se anula, ${client.name} quedaría debiendo menos de cero. Corrige el monto con el lápiz, o anula primero el abono que lo compensa.`,
+        okText: 'Entendido',
+        noCancel: true,
+      });
+      return;
+    }
     const owner = await requireOwner('Anular: autorización de la dueña');
     if (!owner) return;
     const reason = await askText({
       title: entry.kind === 'payment' ? 'Anular abono' : 'Anular deuda',
-      message: `${formatDateTime(entry.date)} · ${money(Math.abs(entry.amountCents))}`,
+      message: `${formatWhen(entry.date)} · ${money(Math.abs(entry.amountCents))}`,
       label: '¿Por qué se anula?',
       okText: 'Anular',
       danger: true,
@@ -246,13 +325,18 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
       }
     >
       <div className="stats">
-        <Stat label="Pendiente por cobrar" value={money(Math.max(0, client.balanceCents))} tone={client.balanceCents > 0 ? 'bad' : 'plain'} big />
-        {client.creditLimitCents && <Stat label="Límite de fiado" value={money(client.creditLimitCents)} />}
+        {client.balanceCents < 0 ? (
+          <Stat label="A favor del cliente" value={money(-client.balanceCents)} tone="good" big sub="pagó de más: no debe nada" />
+        ) : (
+          <Stat label="Pendiente por cobrar" value={money(client.balanceCents)} tone={client.balanceCents > 0 ? 'bad' : 'plain'} big sub={client.balanceCents > 0 ? undefined : 'no debe nada'} />
+        )}
+        {client.creditLimitCents ? <Stat label="Límite de fiado" value={money(client.creditLimitCents)} /> : null}
         {lottery && <Stat label="Lotería (30 días)" value={money(lottery.playsCents)} sub={`${plural(lottery.plays, 'jugada', 'jugadas')} · ${plural(lottery.prizes, 'premio', 'premios')} (${money(lottery.prizesCents)})`} />}
       </div>
       <p className="muted small-text">
-        {client.phone ? `Tel. ${client.phone}` : 'Sin teléfono'}
+        {client.phone ? `Tel. ${formatPhone(client.phone)}` : 'Sin teléfono'}
         {client.notes ? ` · ${client.notes}` : ''}
+        {!client.active ? ' · archivado' : ''}
       </p>
       {canEdit && (
         <div className="actions wrap">
@@ -285,8 +369,9 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
         />
       </div>
       {shown.length > 0 ? (
-        <div className="table-wrap">
-          <table className="table">
+        // En el teléfono cada línea de la cuenta se vuelve una tarjetita (qué y monto arriba, fecha y lo que quedó debiendo abajo).
+        <div className="table-wrap account-wrap">
+          <table className="table account">
             <thead>
               <tr>
                 <th>Fecha</th>
@@ -301,20 +386,35 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
                 const manual = h.kind === 'payment' || h.kind === 'charge';
                 return (
                   <tr key={h.id} className={h.status === 'void' ? 'voided' : ''}>
-                    <td>{formatDateTime(h.date)}</td>
-                    <td>
-                      {CREDIT_LABELS[h.kind]}
-                      {h.note ? <small className="muted"> · {h.note}</small> : null}
+                    <td className="when">{formatWhen(h.date)}</td>
+                    <td className="what">
+                      {lineLabel(h).label}
+                      {lineLabel(h).note ? <small className="muted"> · {lineLabel(h).note}</small> : null}
                       {h.status === 'void' ? <small className="muted"> · ANULADO</small> : null}
-                      {canEdit && !manual && h.status !== 'void' && <small className="muted"> · se corrige en {h.kind === 'lottery' ? 'Lotería' : 'Ventas'}</small>}
+                      {(h.kind === 'sale' || h.kind === 'lottery') &&
+                        h.status !== 'void' &&
+                        (voidedOrigins.has(h.saleId) ? (
+                          <small className="muted"> · anulada</small>
+                        ) : (
+                          canEdit && <small className="muted"> · se corrige en {h.kind === 'lottery' ? 'Lotería' : 'Ventas'}</small>
+                        ))}
                     </td>
-                    <td className={`num ${h.amountCents > 0 ? 'bad-text' : 'good-text'}`}>
+                    <td className={`num amt ${h.amountCents > 0 ? 'bad-text' : 'good-text'}`}>
                       {h.amountCents > 0 ? '+' : '−'}
                       {money(Math.abs(h.amountCents))}
                     </td>
-                    <td className="num">{money(h.runningCents)}</td>
+                    <td className="num after">
+                      {h.runningCents < 0 ? (
+                        <span className="good-text">a favor {money(-h.runningCents)}</span>
+                      ) : (
+                        <>
+                          <small className="mobile-only">quedó debiendo </small>
+                          {money(h.runningCents)}
+                        </>
+                      )}
+                    </td>
                     {canEdit && (
-                      <td className="row-actions">
+                      <td className="row-actions acts">
                         {manual && h.status !== 'void' && (
                           <>
                             <button className="icon-btn" onClick={() => void startEdit(h)} aria-label="Corregir">
@@ -332,14 +432,60 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
               })}
             </tbody>
           </table>
+          {carried !== 0 && (
+            <p className="muted small-text">{carried > 0 ? `Venía debiendo de antes: ${money(carried)}` : `Tenía a favor de antes: ${money(-carried)}`}</p>
+          )}
         </div>
       ) : (
-        <p className="muted">{account?.length ? 'Nada en ese mes.' : 'Nunca ha cogido fiado.'}</p>
+        <p className="muted">
+          {!account?.length
+            ? 'Nunca ha cogido fiado.'
+            : client.balanceCents > 0
+              ? `Nada en ese mes. Lo que debe (${money(client.balanceCents)}) viene de otros meses: toca «Todo».`
+              : 'Nada en ese mes.'}
+        </p>
       )}
       {paying && <PaymentModal client={client} userId={user.id} onClose={() => setPaying(false)} />}
       {charging && <ChargeModal client={client} userId={user.id} onClose={() => setCharging(false)} />}
       {editingEntry && <EditCreditModal entry={editingEntry.entry} client={client} ownerId={editingEntry.ownerId} onClose={() => setEditingEntry(null)} />}
     </Modal>
+  );
+}
+
+/** Sugerencias de siempre (van después de las que ya se usaron). */
+const COMMON_NOTES: Record<'payment' | 'charge', string[]> = {
+  payment: ['Pagó en efectivo', 'Pagó por transferencia', 'Abono de la quincena'],
+  charge: ['Lo que debía en la libreta', 'Fiado que no se anotó', 'Préstamo', 'Lotería fiada', 'Compra en la tienda'],
+};
+
+/**
+ * Campo de nota con sugerencias: al escribir salen las notas que ya se usaron antes (de cualquier cliente), las más
+ * nuevas primero, para no escribir lo mismo cada vez.
+ */
+function NoteField(props: { label: string; kind: 'payment' | 'charge'; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  const listId = useId();
+  const notes = useLiveQuery(async () => {
+    const rows = await db.credit
+      .orderBy('date')
+      .reverse()
+      .filter(e => e.kind === props.kind && !!e.note?.trim())
+      .limit(300)
+      .toArray();
+    return [...new Set([...rows.map(r => r.note!.trim()), ...COMMON_NOTES[props.kind]])].slice(0, 60);
+  }, [props.kind]);
+  return (
+    <Field label={props.label} hint="Al escribir te sugiere lo que ya usaste antes">
+      {id => (
+        <>
+          <input id={id} list={listId} autoComplete="off" value={props.value} onChange={e => props.onChange(e.target.value)} placeholder={props.placeholder} />
+          <datalist id={listId}>
+            {notes?.map(n => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </>
+      )}
+    </Field>
   );
 }
 
@@ -388,12 +534,23 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
     >
       <div className="stats">
         <Stat label="Debe ahora" value={money(client.balanceCents)} tone="bad" />
-        <Stat label="Después del abono" value={cents ? money(Math.max(0, left)) : '—'} tone={cents && left === 0 ? 'good' : 'plain'} big sub={left < 0 ? 'Es más de lo que debe' : undefined} />
+        <Stat
+          label="Después del abono"
+          value={!cents ? '—' : left < 0 ? '—' : money(left)}
+          tone={!cents ? 'plain' : left < 0 ? 'bad' : left === 0 ? 'good' : 'plain'}
+          big
+          sub={cents && left === 0 ? 'queda al día' : undefined}
+        />
       </div>
+      {cents !== null && left < 0 && (
+        <p className="error-text">
+          Son {money(-left)} de más: {client.name} solo debe {money(client.balanceCents)}.
+        </p>
+      )}
       <div className="row3">
         <Field label="Cuánto abona">{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
         <DayField value={day} onChange={setDay} />
-        <Field label="Nota (opcional)">{id => <input id={id} value={note} onChange={e => setNote(e.target.value)} />}</Field>
+        <NoteField label="Nota (opcional)" kind="payment" value={note} onChange={setNote} />
       </div>
       <button className="btn small" onClick={() => setAmount((client.balanceCents / 100).toFixed(2))}>
         Lo paga todo
@@ -410,6 +567,7 @@ function ChargeModal({ client, userId, onClose }: { client: Client; userId: stri
   const [note, setNote] = useState('');
   const [day, setDay] = useState(dayKeyOf());
   const cents = parseMoney(amount);
+  const after = client.balanceCents + (cents ?? 0);
   return (
     <Modal
       title={`Anotar deuda de ${client.name}`}
@@ -423,7 +581,10 @@ function ChargeModal({ client, userId, onClose }: { client: Client; userId: stri
             className="btn primary"
             disabled={!cents || !note.trim()}
             onClick={async () => {
-              const done = await run(() => addCharge(db, client.id, cents!, userId, note, day), `Anotado: ${client.name} debe ${money(client.balanceCents + cents!)}`);
+              const done = await run(
+                () => addCharge(db, client.id, cents!, userId, note, day),
+                after > 0 ? `Anotado: ${client.name} debe ${money(after)}` : after < 0 ? `Anotado: a ${client.name} le quedan ${money(-after)} a favor` : `Anotado: ${client.name} queda al día`,
+              );
               if (done) onClose();
             }}
           >
@@ -433,12 +594,27 @@ function ChargeModal({ client, userId, onClose }: { client: Client; userId: stri
       }
     >
       <p className="muted">Para lo que debía antes de usar la app, o algo que se fió y no se anotó. Lo de una venta o una jugada se anota allá.</p>
-      <div className="row3">
-        <Field label="Cuánto debe">{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+      <div className="stats">
+        <BalanceStat labels={['Debe ahora', 'Tiene a favor']} cents={client.balanceCents} />
+        <BalanceStat labels={['Con esta deuda queda debiendo', 'Con esta deuda le queda a favor']} cents={cents ? after : null} big />
+      </div>
+      <Field label="Cuánto se le anota (solo lo nuevo)">{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+      <div className="row2">
         <DayField value={day} onChange={setDay} />
-        <Field label="De qué es">{id => <input id={id} value={note} onChange={e => setNote(e.target.value)} placeholder="Ej. lo que debía en la libreta" />}</Field>
+        <NoteField label="De qué es (obligatorio)" kind="charge" value={note} onChange={setNote} placeholder="Ej. lo de la libreta" />
       </div>
     </Modal>
+  );
+}
+
+/** "Debe ahora RD$ X" en rojo, "Tiene a favor RD$ X" en verde, o "Nada (al día)"; "—" si todavía no hay monto. */
+function BalanceStat({ labels: [owes, favor], cents, big }: { labels: [string, string]; cents: number | null; big?: boolean }) {
+  const { money } = useSession();
+  if (cents === null) return <Stat label={owes} value="—" big={big} />;
+  return cents < 0 ? (
+    <Stat label={favor} value={money(-cents)} tone="good" big={big} />
+  ) : (
+    <Stat label={owes} value={cents === 0 ? 'Nada (al día)' : money(cents)} tone={cents > 0 ? 'bad' : 'plain'} big={big} />
   );
 }
 
@@ -452,6 +628,9 @@ function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLi
   const [note, setNote] = useState(entry.note ?? '');
   const cents = parseMoney(amount);
   const diff = cents ? (isPayment ? -cents : cents) - entry.amountCents : 0;
+  const after = client.balanceCents + diff;
+  // Solo se frena un cambio que baja lo que debe por debajo de cero (con saldo a favor se puede corregir la fecha o la nota).
+  const blocked = diff < 0 && after < 0;
   return (
     <Modal
       title={isPayment ? 'Corregir abono' : 'Corregir deuda'}
@@ -463,7 +642,7 @@ function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLi
           </button>
           <button
             className="btn primary"
-            disabled={!cents || (!isPayment && !note.trim())}
+            disabled={!cents || (!isPayment && !note.trim()) || blocked}
             onClick={async () => {
               const done = await run(async () => (await updateCreditEntry(db, entry.id, { amountCents: cents!, dayKey: day, note }, ownerId), true), 'Corregido: la cuenta se recalculó');
               if (done) onClose();
@@ -475,13 +654,22 @@ function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLi
       }
     >
       <p className="muted">
-        Antes: {formatDateTime(entry.date)} · {money(Math.abs(entry.amountCents))}.{' '}
-        {cents ? `Con el cambio, ${client.name} queda debiendo ${money(client.balanceCents + diff)}.` : ''}
+        Antes: {formatWhen(entry.date)} · {money(Math.abs(entry.amountCents))}.
       </p>
-      <div className="row3">
-        <Field label={isPayment ? 'Cuánto abonó' : 'Cuánto debe'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+      <div className="stats">
+        <BalanceStat labels={['Debe ahora', 'Tiene a favor']} cents={client.balanceCents} />
+        <BalanceStat labels={['Con el cambio queda debiendo', 'Con el cambio le queda a favor']} cents={cents && !blocked ? after : null} big />
+      </div>
+      {cents !== null && blocked && (
+        <p className="error-text">
+          Así a {client.name} le quedarían {money(-after)} a favor{client.balanceCents < 0 ? ` (ahora tiene ${money(-client.balanceCents)})` : ''}:{' '}
+          {isPayment ? 'el abono no puede ser más de lo que debía' : 'la deuda no puede bajar tanto'}. Revisa el monto.
+        </p>
+      )}
+      <Field label={isPayment ? 'Cuánto abonó' : 'Monto de esta deuda'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+      <div className="row2">
         <DayField value={day} onChange={setDay} />
-        <Field label={isPayment ? 'Nota (opcional)' : 'De qué es'}>{id => <input id={id} value={note} onChange={e => setNote(e.target.value)} />}</Field>
+        <NoteField label={isPayment ? 'Nota (opcional)' : 'De qué es (obligatorio)'} kind={isPayment ? 'payment' : 'charge'} value={note} onChange={setNote} />
       </div>
     </Modal>
   );

@@ -1,7 +1,7 @@
 import { add } from 'dexie';
 import type { MartinaDb } from '../db/database';
 import type { Id, Movement, MovementType } from '../db/types';
-import { BusinessError, newId, nowIso } from './common';
+import { BusinessError, newId, nowIso, pluralUnit } from './common';
 
 /** Hacia dónde mueve cada tipo: entra (+1), sale (-1) o cualquiera (0, el conteo físico). */
 const DIRECTION: Record<MovementType, 1 | -1 | 0> = {
@@ -47,7 +47,7 @@ export async function recordMovement(database: MartinaDb, input: MovementInput):
   if (!product) throw new BusinessError('El producto no existe.');
   const stockAfter = roundQty(product.stock + input.quantity);
   if (stockAfter < 0 && !input.allowNegative)
-    throw new BusinessError(`No hay suficiente "${product.name}": quedan ${product.stock} ${product.unit}.`);
+    throw new BusinessError(`No hay suficiente "${product.name}": quedan ${product.stock} ${product.stock === 1 ? product.unit : pluralUnit(product.unit)}.`);
 
   const movement: Movement = {
     id: newId(),

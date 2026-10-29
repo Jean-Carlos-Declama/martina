@@ -1,6 +1,7 @@
 import { getSettings, type MartinaDb } from '../db/database';
 import type { Day, DayTotals, Id, LotteryEntry, Prize } from '../db/types';
 import { audit } from './audit';
+import { createClient } from './clients';
 import { BusinessError, dayKeyOf, newId, nowIso, percentOf } from './common';
 import { addCredit } from './credit';
 import { normalize } from './products';
@@ -40,8 +41,10 @@ export interface LotteryInput {
   clientName?: string;
   amountCents: number;
   lottery?: string;
-  /** Fiado: va a la cuenta del cliente (tiene que estar registrado). */
+  /** Fiado: va a la cuenta del cliente (tiene que estar registrado, o venir en newClientName). */
   credit?: boolean;
+  /** Fiado a alguien que no está registrado: se registra como cliente en la misma transacción (si no se anota, tampoco). */
+  newClientName?: string;
   note?: string;
   userId: Id;
   /** Llave única (se genera al abrir el formulario): el doble toque no anota dos veces. */
@@ -62,19 +65,20 @@ function targetDay(dayKey?: string): string {
 /** Anota lo que jugó un cliente (hoy, o en un día anterior que siga abierto). */
 export async function addLotterySale(database: MartinaDb, input: LotteryInput): Promise<LotteryEntry> {
   if (!(input.amountCents > 0)) throw new BusinessError('La cantidad tiene que ser mayor que cero.');
-  if (input.credit && !input.clientId) throw new BusinessError('Para fiar hay que escoger el cliente.');
+  if (input.credit && !input.clientId && !input.newClientName?.trim()) throw new BusinessError('Para fiar hay que escoger el cliente.');
   const dayKey = targetDay(input.dayKey);
   const tables = [database.lottery, database.days, database.settings, database.clients, database.credit, database.audit];
   return database.transaction('rw', tables, async () => {
     const repeated = await database.lottery.where('requestId').equals(input.requestId).first();
     if (repeated) return repeated;
     await ensureDayOpen(database, dayKey);
+    const clientId = input.clientId ?? (input.newClientName?.trim() ? (await createClient(database, { name: input.newClientName }, input.userId)).id : undefined);
     const entry: LotteryEntry = {
       id: newId(),
       dayKey,
       date: nowIso(),
-      clientId: input.clientId,
-      clientName: await nameFor(database, input.clientId, input.clientName),
+      clientId,
+      clientName: await nameFor(database, clientId, input.clientName),
       amountCents: Math.round(input.amountCents),
       lottery: input.lottery?.trim() || undefined,
       credit: !!input.credit,
@@ -202,12 +206,16 @@ export async function voidPrize(database: MartinaDb, prizeId: Id, userId: Id, re
 /** Una fila del cuadre: un cliente con lo que jugó y los premios que cobró ese día. */
 export interface DayClientRow {
   name: string;
+  /** El cliente registrado (si lo es): para mostrar lo que debe. */
+  clientId?: Id;
   /** Cuántas veces jugó. */
   purchases: number;
   purchasesCents: number;
   /** Cuántas veces cobró premio. */
   prizes: number;
   prizesCents: number;
+  /** De lo que jugó ese día, cuánto fue fiado. */
+  creditCents: number;
 }
 
 export interface DayReport {
@@ -230,15 +238,15 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
 
   // "Pedro", "pedro " y "PEDRO" son la misma fila. Se muestra el nombre del cliente registrado o, si no, el que
   // empieza con mayúscula.
-  const rows = new Map<string, DayClientRow & { registered: boolean }>();
-  const row = (name: string, registered: boolean): DayClientRow => {
+  const rows = new Map<string, DayClientRow>();
+  const row = (name: string, clientId?: Id): DayClientRow => {
     const clean = name.trim().replace(/\s+/g, ' ');
     const key = normalize(clean);
     let found = rows.get(key);
-    if (!found) rows.set(key, (found = { name: clean, registered, purchases: 0, purchasesCents: 0, prizes: 0, prizesCents: 0 }));
-    else if (registered ? !found.registered : !found.registered && isLower(found.name) && !isLower(clean)) {
+    if (!found) rows.set(key, (found = { name: clean, clientId, purchases: 0, purchasesCents: 0, prizes: 0, prizesCents: 0, creditCents: 0 }));
+    else if (clientId ? !found.clientId : !found.clientId && isLower(found.name) && !isLower(clean)) {
       found.name = clean;
-      found.registered = registered;
+      found.clientId = clientId;
     }
     return found;
   };
@@ -253,16 +261,17 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
   let salesCents = 0;
   let creditCents = 0;
   for (const entry of entries) {
-    const r = row(entry.clientName, !!entry.clientId);
+    const r = row(entry.clientName, entry.clientId);
     r.purchases++;
     r.purchasesCents += entry.amountCents;
+    if (entry.credit) r.creditCents += entry.amountCents;
     salesCents += entry.amountCents;
     if (entry.credit) creditCents += entry.amountCents;
     lottery(entry.lottery).salesCents += entry.amountCents;
   }
   let prizesCents = 0;
   for (const prize of prizes) {
-    const r = row(prize.clientName, !!prize.clientId);
+    const r = row(prize.clientName, prize.clientId);
     r.prizes++;
     r.prizesCents += prize.amountCents;
     prizesCents += prize.amountCents;
@@ -282,7 +291,7 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
     dayKey,
     status: day?.status ?? 'open',
     totals,
-    clients: [...rows.values()].map(({ registered: _registered, ...r }) => r).sort((a, b) => a.name.localeCompare(b.name, 'es')),
+    clients: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name, 'es')),
     byLottery: [...lotteries.values()].sort((a, b) => b.salesCents - a.salesCents),
     creditCents,
   };

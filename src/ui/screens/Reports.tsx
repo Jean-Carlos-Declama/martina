@@ -11,7 +11,7 @@ import { DeliverStat } from './Lottery';
 
 type Period = 'today' | 'week' | 'month' | 'custom';
 
-export default function Reports() {
+export default function Reports({ goDebts }: { goDebts: () => void }) {
   const { money } = useSession();
   const [period, setPeriod] = useState<Period>('week');
   const [custom, setCustom] = useState({ from: shiftDay(dayKeyOf(), -30), to: dayKeyOf() });
@@ -60,7 +60,8 @@ export default function Reports() {
               <DeliverStat cents={lottery.totals.deliverCents} money={money} />
             </div>
             <div className="table-wrap">
-              <table className="table">
+              {/* En el teléfono cada día es una tarjetita con sus 4 números (sin deslizar de lado). */}
+              <table className="table stack">
                 <thead>
                   <tr>
                     <th>Día</th>
@@ -76,12 +77,18 @@ export default function Reports() {
                       <td>
                         {dayLabel(d.dayKey, false)} {d.status === 'open' && <small className="warn-text">(abierto)</small>}
                       </td>
-                      <td className="num">{money(d.totals.salesCents)}</td>
-                      <td className="num good-text">
-                        {money(d.totals.commissionCents)} <small className="muted">{d.totals.commissionPct}%</small>
+                      <td className="num" data-label="Venta">
+                        {money(d.totals.salesCents)}
                       </td>
-                      <td className="num bad-text">{money(d.totals.prizesCents)}</td>
-                      <td className={`num ${d.totals.deliverCents < 0 ? 'bad-text' : ''}`}>{money(d.totals.deliverCents)}</td>
+                      <td className="num good-text" data-label={`Comisión ${d.totals.commissionPct}%`}>
+                        {money(d.totals.commissionCents)} <small className="muted desktop-only">{d.totals.commissionPct}%</small>
+                      </td>
+                      <td className="num bad-text" data-label="Premios">
+                        {money(d.totals.prizesCents)}
+                      </td>
+                      <td className={`num ${d.totals.deliverCents < 0 ? 'bad-text' : ''}`} data-label={d.totals.deliverCents < 0 ? 'Faltante' : 'A entregar'}>
+                        {money(d.totals.deliverCents)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -119,7 +126,7 @@ export default function Reports() {
             )}
             <h3>Lo que más se vende</h3>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table stack">
                 <thead>
                   <tr>
                     <th>Producto</th>
@@ -132,9 +139,15 @@ export default function Reports() {
                   {store.top.map(p => (
                     <tr key={p.productId}>
                       <td>{p.name}</td>
-                      <td className="num">{formatQty(p.quantity)}</td>
-                      <td className="num">{money(p.revenueCents)}</td>
-                      <td className="num good-text">{money(p.profitCents)}</td>
+                      <td className="num" data-label="Cantidad">
+                        {formatQty(p.quantity)}
+                      </td>
+                      <td className="num" data-label="Vendido">
+                        {money(p.revenueCents)}
+                      </td>
+                      <td className="num good-text" data-label="Ganancia">
+                        {money(p.profitCents)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -146,7 +159,7 @@ export default function Reports() {
         )}
       </section>
 
-      <div className="two-cols">
+      <div className="two-cols top">
         {inventory && (
           <section className="card">
             <h2>Inventario ahora</h2>
@@ -160,17 +173,27 @@ export default function Reports() {
         <section className="card">
           <h2>Quién debe más</h2>
           {debtors && debtors.length > 0 ? (
-            <ul className="list">
-              {debtors
-                .sort((a, b) => b.balanceCents - a.balanceCents)
-                .slice(0, 10)
-                .map(c => (
-                  <li key={c.id}>
-                    <span className="grow">{c.name}</span>
-                    <span className="amount bad-text">{money(c.balanceCents)}</span>
-                  </li>
-                ))}
-            </ul>
+            <>
+              <p className="muted">
+                {plural(debtors.length, 'cliente debe', 'clientes deben')} <strong className="bad-text">{money(debtors.reduce((sum, c) => sum + c.balanceCents, 0))}</strong> en total.
+              </p>
+              <ul className="list">
+                {[...debtors]
+                  .sort((a, b) => b.balanceCents - a.balanceCents || a.name.localeCompare(b.name, 'es'))
+                  .slice(0, 10)
+                  .map(c => (
+                    <li key={c.id}>
+                      <button className="row-button" onClick={goDebts} title="Ver la lista de los que deben">
+                        <span className="grow">{c.name}</span>
+                        <span className="amount bad-text">{money(c.balanceCents)}</span>
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+              <button className="btn block" onClick={goDebts}>
+                {debtors.length > 10 ? `y ${debtors.length - 10} más — ver todos los que deben` : 'Ver los que deben y abonar'}
+              </button>
+            </>
           ) : (
             <p className="muted">Nadie debe. 🎉</p>
           )}

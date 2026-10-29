@@ -135,7 +135,7 @@ await shot('m11-vender');
 await page.locator('.sell-cart').getByRole('button', { name: /Cobrar/ }).click();
 await page.getByLabel('Recibido').fill('500');
 await shot('m13-cobrar');
-await modal().getByRole('button', { name: /Cobrar/ }).click();
+await modal().getByRole('button', { name: /Cobrar|Fiar/ }).click();
 await page.getByRole('heading', { name: /Recibo #/ }).waitFor();
 await clearToasts();
 await shot('m14-recibo');
@@ -145,8 +145,8 @@ await page.locator('.product-tile', { hasText: 'Aceite' }).click();
 await page.locator('.product-tile', { hasText: 'Arroz' }).click();
 await page.locator('.sell-cart').getByRole('button', { name: /Cobrar/ }).click();
 await modal().getByRole('tab', { name: 'Fiado' }).click();
-await page.getByLabel('Cliente (opcional)').fill('Doña Rosa');
-await modal().getByRole('button', { name: /Cobrar/ }).click();
+await modal().getByLabel(/^Cliente/).fill('Doña Rosa');
+await modal().getByRole('button', { name: /Cobrar|Fiar/ }).click();
 await modal().getByRole('button', { name: 'Listo' }).click();
 
 // Ficha de producto y entrada de mercancía
@@ -220,6 +220,24 @@ await page.setViewportSize({ width: 820, height: 1180 });
 await nav('Lotería');
 await clearToasts();
 await shot('m26-de-pie');
+
+// La pregunta "¿A quién se le fía?" (Fiado con un nombre a medias); se cancela para no anotar nada.
+await page.setViewportSize({ width: 1180, height: 820 });
+await nav('Lotería');
+await page.getByLabel('Cliente', { exact: true }).fill('pedro');
+await page.getByLabel('Cuánto jugó').fill('100');
+await page.getByLabel('Fiado').check();
+await page.getByRole('button', { name: 'Anotar jugada' }).click();
+await page.getByRole('heading', { name: '¿A quién se le fía?' }).waitFor();
+await shot('m32-a-quien', modal());
+await modal().getByRole('button', { name: 'Cancelar' }).click();
+
+// Teléfono: el menú de abajo con "Más".
+await page.setViewportSize({ width: 390, height: 844 });
+await page.locator('nav').getByRole('button', { name: 'Inicio', exact: true }).click();
+await page.locator('nav').getByRole('button', { name: 'Más', exact: true }).click();
+await shot('m31-telefono-mas');
+await page.keyboard.press('Escape');
 
 } catch (e) { await page.screenshot({ path: `${OUT}/fallo.png` }); console.log('FALLO:', String(e).slice(0,300)); console.log('PANTALLA:', (await page.locator('body').innerText()).slice(0,600)); }
 console.log('ERRORES:', errors.length ? errors.join('\n') : 'ninguno');

@@ -6,6 +6,7 @@ import { db, getDeviceLocal, getSettings } from './db/database';
 import type { User } from './db/types';
 import { SessionProvider, UiProvider, useSession, useUi } from './ui/context';
 import { Icon, type IconName } from './ui/icons';
+import { Modal } from './ui/kit';
 import { LinkLanding, SyncBadge } from './ui/screens/Devices';
 import { Home } from './ui/screens/Home';
 import { Lock, Setup } from './ui/screens/Lock';
@@ -32,6 +33,21 @@ const NAV: { screen: Screen; label: string; icon: IconName; seesMoney?: boolean;
   { screen: 'reports', label: 'Reportes', icon: 'chart', seesMoney: true },
   { screen: 'settings', label: 'Ajustes', icon: 'gear' },
 ];
+
+/** En el teléfono, los que van en la barra de abajo; el resto va en "Más". */
+const PHONE_MAIN: Screen[] = ['home', 'lottery', 'sell', 'clients'];
+
+/** ¿La pantalla cumple esta condición de tamaño? (se actualiza al girar el equipo o cambiar el tamaño). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const list = matchMedia(query);
+    const onChange = () => setMatches(list.matches);
+    list.addEventListener('change', onChange);
+    return () => list.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
 
 export default function App({ startError }: { startError?: unknown }) {
   const userCount = useLiveQuery(() => db.users.count(), []);
@@ -128,6 +144,26 @@ function Shell() {
   }, [settings.lockMinutes, lock]);
 
   const nav = NAV.filter(item => (!item.seesMoney || seesMoney) && (!item.edits || canEdit));
+  // En el teléfono no caben 9 botones abajo: quedan los principales y "Más" con el resto (nada queda escondido de lado).
+  const narrow = useMediaQuery('(max-width: 700px)');
+  const [moreOpen, setMoreOpen] = useState(false);
+  // Al girar el teléfono (ya no es angosto) "Más" se cierra, y no vuelve a abrirse sola al ponerlo de pie otra vez.
+  const [wasNarrow, setWasNarrow] = useState(narrow);
+  if (narrow !== wasNarrow) {
+    setWasNarrow(narrow);
+    if (!narrow) setMoreOpen(false);
+  }
+  const mainNav = narrow ? nav.filter(item => PHONE_MAIN.includes(item.screen)) : nav;
+  const moreNav = narrow ? nav.filter(item => !PHONE_MAIN.includes(item.screen)) : [];
+  const go = (target: Screen) => {
+    setClientsFilter('all');
+    setScreen(target);
+    setMoreOpen(false);
+  };
+  const goDebts = () => {
+    setClientsFilter('debt');
+    setScreen('clients');
+  };
   return (
     <div className="shell">
       <nav className="nav" aria-label="Menú">
@@ -135,42 +171,54 @@ function Shell() {
           {settings.businessName}
           <SyncBadge />
         </div>
-        {nav.map(item => (
-          <button
-            key={item.screen}
-            className={screen === item.screen ? 'on' : ''}
-            aria-current={screen === item.screen ? 'page' : undefined}
-            onClick={() => {
-              setClientsFilter('all');
-              setScreen(item.screen);
-            }}
-          >
+        {mainNav.map(item => (
+          <button key={item.screen} className={screen === item.screen ? 'on' : ''} aria-current={screen === item.screen ? 'page' : undefined} onClick={() => go(item.screen)}>
             <Icon name={item.icon} />
             <span>{item.label}</span>
           </button>
         ))}
-        <button className="nav-lock" onClick={lock} title={`Bloquear (${user.name})`}>
-          <Icon name="lock" />
-          <span>Bloquear</span>
-        </button>
+        {narrow ? (
+          <button className={moreNav.some(item => item.screen === screen) ? 'on' : ''} onClick={() => setMoreOpen(true)} aria-haspopup="dialog">
+            <Icon name="menu" />
+            <span>Más</span>
+          </button>
+        ) : (
+          <button className="nav-lock" onClick={lock} title={`Bloquear (${user.name})`}>
+            <Icon name="lock" />
+            <span>Bloquear</span>
+          </button>
+        )}
       </nav>
+      {/* Solo en el teléfono: si se gira y el menú de abajo ya trae todo, la ventana no se queda abierta medio vacía. */}
+      {moreOpen && narrow && (
+        <Modal title="Más" onClose={() => setMoreOpen(false)}>
+          <div className="more-menu">
+            {moreNav.map(item => (
+              <button key={item.screen} className={`btn block ${screen === item.screen ? 'primary' : ''}`} onClick={() => go(item.screen)}>
+                <Icon name={item.icon} /> {item.label}
+              </button>
+            ))}
+            <button
+              className="btn block"
+              onClick={() => {
+                setMoreOpen(false);
+                lock();
+              }}
+            >
+              <Icon name="lock" /> Bloquear ({user.name})
+            </button>
+          </div>
+        </Modal>
+      )}
       <main className="content">
         <Suspense fallback={<p className="muted center">Cargando…</p>}>
-          {screen === 'home' && (
-            <Home
-              go={setScreen}
-              goDebts={() => {
-                setClientsFilter('debt');
-                setScreen('clients');
-              }}
-            />
-          )}
+          {screen === 'home' && <Home go={go} goDebts={goDebts} />}
           {screen === 'lottery' && <Lottery />}
           {screen === 'sell' && canEdit && <Sell />}
           {screen === 'products' && <Products />}
           {screen === 'clients' && <Clients key={clientsFilter} initialFilter={clientsFilter} />}
           {screen === 'sales' && <SalesHistory />}
-          {screen === 'reports' && seesMoney && <Reports />}
+          {screen === 'reports' && seesMoney && <Reports goDebts={goDebts} />}
           {screen === 'settings' && <SettingsScreen />}
         </Suspense>
       </main>

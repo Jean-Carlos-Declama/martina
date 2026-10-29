@@ -22,11 +22,16 @@ export function toCents(amount: number): number {
   return Math.round(amount * 100);
 }
 
-/** Muestra centavos como dinero: RD$ 1,234.50 */
+/** Muestra centavos como dinero: RD$ 1,234.50 (con espacio duro: "RD$" y el número nunca quedan en renglones distintos). */
 export function formatMoney(cents: number, currency = 'RD$'): string {
   const sign = cents < 0 ? '-' : '';
   const value = (Math.abs(cents) / 100).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${sign}${currency} ${value}`;
+  return `${sign}${currency} ${value}`;
+}
+
+/** El plural de una unidad: "unidad" → "unidades", "libra" → "libras", "galón" → "galones". */
+export function pluralUnit(unit: string): string {
+  return /[aeiou]$/i.test(unit) ? `${unit}s` : unit.endsWith('ón') ? `${unit.slice(0, -2)}ones` : `${unit}es`;
 }
 
 /** Un porcentaje de una cantidad en centavos, redondeado al centavo. */

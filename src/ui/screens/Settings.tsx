@@ -178,12 +178,12 @@ function SecuritySection() {
           <h3>Quién usa la app</h3>
           <ul className="list">
             {users?.map(u => (
-              <li key={u.id} className={u.active ? '' : 'voided'}>
+              <li key={u.id} className={`user-row ${u.active ? '' : 'voided'}`}>
                 <span className="grow">
                   <strong>{u.name}</strong> <small className="muted">{ROLE_LABELS[u.role]}</small>
                 </span>
                 {u.id !== user.id && (
-                  <>
+                  <span className="row-tools">
                     <button
                       className="btn small"
                       onClick={async () => {
@@ -196,7 +196,7 @@ function SecuritySection() {
                     <button className="btn small" onClick={() => void run(() => setUserActive(db, u.id, !u.active, user.id))}>
                       {u.active ? 'Desactivar' : 'Activar'}
                     </button>
-                  </>
+                  </span>
                 )}
               </li>
             ))}
@@ -273,9 +273,9 @@ function AddUserModal({ onClose }: { onClose: () => void }) {
         <Field label="Puede">
           {id => (
             <select id={id} value={role} onChange={e => setRole(e.target.value as Role)}>
-              <option value="employee">Empleado: vender, anotar lotería, cobrar fiado</option>
-              <option value="viewer">Solo mirar: ve todos los números, no anota nada</option>
-              <option value="owner">Dueña: todo</option>
+              <option value="employee">Empleado</option>
+              <option value="viewer">Solo mirar</option>
+              <option value="owner">Dueña</option>
             </select>
           )}
         </Field>
@@ -391,7 +391,7 @@ function BackupSection() {
   const restore = async (file: File) => {
     const ok = await confirm({
       title: 'Recuperar respaldo',
-      message: `Esto BORRA todo lo que hay ahora en este iPad y pone lo del archivo "${file.name}".\n\n¿Seguro?`,
+      message: `Esto BORRA todo lo que hay ahora en este equipo y pone lo del archivo "${file.name}".\n\n¿Seguro?`,
       okText: 'Sí, recuperar',
       danger: true,
     });
@@ -409,7 +409,7 @@ function BackupSection() {
       <p className="muted">
         {isLinked()
           ? 'Este equipo está vinculado: todo queda guardado también en la nube. Un respaldo en archivo es una copia extra de este momento (por si acaso); recuperarlo reemplaza lo de TODOS los equipos.'
-          : 'Todo se guarda solo en este iPad. Si se pierde, se daña o se borra el ícono de la app, se pierde todo, menos lo que esté en un respaldo. Guarda uno cada semana en Archivos (iCloud) o mándatelo por WhatsApp.'}
+          : 'Todo se guarda solo en este equipo. Si se pierde, se daña o se borra el ícono de la app, se pierde todo, menos lo que esté en un respaldo. Guarda uno cada semana en Archivos (iCloud) o mándatelo por WhatsApp.'}
       </p>
       <p>
         Último respaldo: <strong>{settings.lastBackupAt ? formatDateTime(settings.lastBackupAt) : 'nunca'}</strong>
@@ -440,6 +440,11 @@ function AuditSection() {
   const [open, setOpen] = useState(false);
   const entries = useLiveQuery(() => (open ? db.audit.orderBy('date').reverse().limit(200).toArray() : []), [open]);
   const users = useLiveQuery(async () => new Map((await db.users.toArray()).map(u => [u.id, u.name])), []);
+  // De qué cliente es cada abono, deuda o cambio (la bitácora guarda solo su número interno).
+  const clients = useLiveQuery(async () => new Map((await db.clients.toArray()).map(c => [c.id, c.name])), []);
+  const clientOf = (entity: string, id?: string) => ((entity === 'cliente' || entity === 'cuenta') && id ? clients?.get(id) : undefined);
+  // Lo que ya está anotado con el tipo en inglés ("Carlos (employee)") se lee en español.
+  const roles = (text?: string) => text?.replace(/\((owner|employee|viewer)\)/g, (_, role: Role) => `(${ROLE_LABELS[role].toLowerCase()})`);
   return (
     <section className="card">
       <div className="card-head">
@@ -450,7 +455,7 @@ function AuditSection() {
       </div>
       {open && entries && (
         <div className="table-wrap">
-          <table className="table">
+          <table className="table stack">
             <thead>
               <tr>
                 <th>Fecha</th>
@@ -463,11 +468,14 @@ function AuditSection() {
               {entries.map(a => (
                 <tr key={a.id}>
                   <td>{formatDateTime(a.date)}</td>
-                  <td>{users?.get(a.userId) ?? ''}</td>
-                  <td>
+                  <td data-label="Quién">{users?.get(a.userId) ?? ''}</td>
+                  <td data-label="Qué">
                     {a.action} {a.entity}
+                    {clientOf(a.entity, a.entityId) ? ` · ${clientOf(a.entity, a.entityId)}` : ''}
                   </td>
-                  <td className="small-text">{a.details}</td>
+                  <td className="small-text" data-label="Detalle">
+                    {roles(a.details)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -493,10 +501,10 @@ function AboutSection() {
       {storage && (
         <p className="muted small-text">
           Espacio usado: {storage.usedMb !== null ? `${storage.usedMb.toFixed(1)} MB` : 'no se sabe'} ·{' '}
-          {storage.persisted ? 'el iPad no borrará los datos por falta de espacio' : 'el iPad podría borrar datos si se llena: usa la app desde el ícono de la pantalla de inicio'}
+          {storage.persisted ? 'el equipo no borrará los datos por falta de espacio' : 'el equipo podría borrar datos si se llena: usa la app desde el ícono de la pantalla de inicio'}
         </p>
       )}
-      <p className="muted small-text">Cuando haya una versión nueva, aparece un aviso abajo para actualizar. Los datos no se pierden al actualizar.</p>
+      <p className="muted small-text">Cuando haya una versión nueva, aparece un aviso arriba para actualizar. Los datos no se pierden al actualizar.</p>
     </section>
   );
 }

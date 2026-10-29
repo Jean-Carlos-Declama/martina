@@ -1,6 +1,7 @@
 import { getDeviceLocal, getSettings, type MartinaDb } from '../db/database';
 import type { Id, PaymentMethod, Sale, SaleLine } from '../db/types';
 import { audit } from './audit';
+import { createClient } from './clients';
 import { BusinessError, dayKeyOf, newId, nowIso } from './common';
 import { addCredit } from './credit';
 import { recordMovement, roundQty } from './stock';
@@ -18,6 +19,8 @@ export interface SaleInput {
   clientId?: Id;
   /** Nombre del cliente (si no está registrado, se escribe a mano). */
   clientName?: string;
+  /** Fiado a alguien que no está registrado: se registra como cliente en la misma transacción (si la venta no se hace, tampoco). */
+  newClientName?: string;
   /** Descuento a toda la venta, en centavos. */
   discountCents?: number;
   /** Llave única de esta operación (se genera al abrir la venta): repetir el toque no crea otra venta. */
@@ -70,12 +73,14 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
       const tax = includedTax(lines, discount, subtotal);
 
       let clientName = input.clientName?.trim() || undefined;
-      if (input.clientId) {
-        const client = await database.clients.get(input.clientId);
+      let clientId = input.clientId;
+      if (!clientId && input.newClientName) clientId = (await createClient(database, { name: input.newClientName }, input.userId)).id;
+      if (clientId) {
+        const client = await database.clients.get(clientId);
         if (!client) throw new BusinessError('El cliente no existe.');
         clientName = client.name;
       }
-      if (input.payment === 'credit' && !input.clientId) throw new BusinessError('Para fiar hay que escoger el cliente.');
+      if (input.payment === 'credit' && !clientId) throw new BusinessError('Para fiar hay que escoger el cliente.');
 
       const sale: Sale = {
         id: newId(),
@@ -83,7 +88,7 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
         series: device.series,
         date: nowIso(),
         dayKey,
-        clientId: input.clientId,
+        clientId,
         clientName,
         lines,
         subtotalCents: subtotal,
@@ -109,7 +114,7 @@ export async function createSale(database: MartinaDb, input: SaleInput): Promise
           reason: `Venta #${receiptNumber(sale)}`,
         });
       }
-      if (input.payment === 'credit') await addCredit(database, input.clientId!, total, 'sale', input.userId, sale.id, `Venta #${receiptNumber(sale)}`);
+      if (input.payment === 'credit') await addCredit(database, clientId!, total, 'sale', input.userId, sale.id, `Venta #${receiptNumber(sale)}`);
       await database.local.put({ ...device, nextSaleNumber: device.nextSaleNumber + 1 });
       return sale;
     },
@@ -149,11 +154,18 @@ export async function voidSale(database: MartinaDb, saleId: Id, ownerId: Id, rea
       if (!sale) throw new BusinessError('La venta no existe.');
       if (sale.status === 'void') return sale;
 
+      // Lo que ya se devolvió con "Devolver productos" no se vuelve a deshacer: solo se anula lo que falta.
+      const returns = await database.movements.where('docId').equals(sale.id).filter(m => m.type === 'customerReturn').toArray();
+      let refundedCents = 0;
       for (const line of sale.lines) {
+        const returned = returns.filter(m => m.productId === line.productId).reduce((sum, m) => sum + m.quantity, 0);
+        refundedCents += refundOf(sale, line, returned);
+        const left = roundQty(line.quantity - returned);
+        if (left <= 0) continue;
         await recordMovement(database, {
           productId: line.productId,
           type: 'saleVoid',
-          quantity: line.quantity,
+          quantity: left,
           userId: ownerId,
           docType: 'sale',
           docId: sale.id,
@@ -161,8 +173,10 @@ export async function voidSale(database: MartinaDb, saleId: Id, ownerId: Id, rea
           reason: `Anulación venta #${receiptNumber(sale)}: ${reason}`,
         });
       }
-      if (sale.payment === 'credit' && sale.clientId)
-        await addCredit(database, sale.clientId, -sale.totalCents, 'saleVoid', ownerId, sale.id, `Anulación venta #${receiptNumber(sale)}`);
+      // Al cliente se le quita lo que valía lo que no devolvió (lo devuelto ya se le rebajó, o se le dio en efectivo).
+      const owedCents = sale.totalCents - refundedCents;
+      if (sale.payment === 'credit' && sale.clientId && owedCents > 0)
+        await addCredit(database, sale.clientId, -owedCents, 'saleVoid', ownerId, sale.id, `Anulación venta #${receiptNumber(sale)}`);
       const voided: Sale = { ...sale, status: 'void', voidedAt: nowIso(), voidedBy: ownerId, voidReason: reason.trim() };
       await database.sales.put(voided);
       await audit(database, ownerId, 'anular', 'venta', sale.id, `#${receiptNumber(sale)}: ${reason.trim()}`);
@@ -249,7 +263,8 @@ export async function refundsBetween(database: MartinaDb, from: string, to: stri
   for (const movement of returns) {
     const sale = movement.docId ? await database.sales.get(movement.docId) : undefined;
     const line = sale?.lines.find(l => l.productId === movement.productId);
-    if (!sale || !line) continue;
+    // Una venta anulada ya no cuenta entera en los reportes: su devolución tampoco se resta.
+    if (!sale || sale.status === 'void' || !line) continue;
     refunds.push({
       dayKey: dayKeyOf(new Date(movement.date)),
       productId: movement.productId,

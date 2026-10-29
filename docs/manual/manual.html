@@ -114,7 +114,7 @@
   <figure class="half"><img src="m03-pin.png" /><figcaption>Pon tu PIN y toca ✓.</figcaption></figure>
   <ul>
     <li>Si nadie la toca en <b>10 minutos</b>, se bloquea sola, para que un cliente no vea ni toque nada. Ese tiempo se cambia en Ajustes.</li>
-    <li>Para bloquearla tú misma, toca <span class="btn">Bloquear</span> en el menú.</li>
+    <li>Para bloquearla tú misma, toca <span class="btn">Bloquear</span> en el menú (en el teléfono está dentro de <span class="btn">Más</span>).</li>
     <li>Si alguien pone un PIN equivocado 5 veces, la app espera 30 segundos.</li>
   </ul>
 </section>
@@ -123,14 +123,17 @@
   <h1>4. Inicio</h1>
   <p>Es el resumen de tu día:</p>
   <ul>
+    <li><b>Pendiente por cobrar</b> (arriba): lo que te deben todos los clientes juntos y los 3 que más deben. Si lo tocas, sale la lista para abonar.</li>
     <li><b>Lotería de hoy:</b> venta, tu comisión, premios pagados y <b>lo que tienes que entregar</b>.</li>
-    <li><b>Tienda hoy:</b> lo vendido, la ganancia y lo que te deben de fiado.</li>
+    <li><b>Tienda hoy:</b> lo vendido y la ganancia.</li>
     <li><b>Hay que reponer:</b> productos agotados (rojo) o con poca existencia (amarillo).</li>
   </ul>
   <p>Los botones <span class="btn">Anotar lotería</span> y <span class="btn">Vender</span> te llevan directo.</p>
   <figure><img src="m04-inicio.png" /><figcaption>La pantalla de inicio.</figcaption></figure>
   <p>El menú de la izquierda (abajo si tienes el iPad de pie) lleva a cada parte de la app.</p>
   <figure class="narrow"><img src="m26-de-pie.png" /><figcaption>Con el iPad de pie, el menú queda abajo.</figcaption></figure>
+  <p>En el <b>teléfono</b>, abajo salen <b>Inicio, Lotería, Vender, Clientes</b> y <span class="btn">Más</span>. En «Más» están <b>Productos, Ventas, Reportes, Ajustes</b> y <b>Bloquear</b>.</p>
+  <figure class="narrow"><img src="m31-telefono-mas.png" /><figcaption>En el teléfono: el botón «Más».</figcaption></figure>
 </section>
 
 <section class="chapter">
@@ -145,12 +148,14 @@
 
   <h3>Anotar una jugada</h3>
   <ol>
-    <li>En <span class="btn">Anotar jugada</span>, escribe el <b>nombre del cliente</b>. La app te sugiere los nombres que ya usaste.</li>
+    <li>En <span class="btn">Anotar jugada</span>, escribe el <b>nombre del cliente</b>. La app te sugiere los nombres que ya usaste. Si escribes solo una parte (por ejemplo «pedro»), debajo salen los clientes que se parecen, <b>con lo que debe cada uno</b>: toca el que es y se llena solo.</li>
     <li>Escribe <b>cuánto jugó</b>, o toca un botón rápido (25, 50, 100, 200, 500).</li>
-    <li>Si se lo fías, marca <b>Fiado</b>. Solo se puede con clientes registrados, y se le suma a su cuenta.</li>
+    <li>Si se lo fías, marca <b>Fiado</b>: se le suma a lo que debe. Mientras escribes el nombre, debajo te dice <b>cuánto debe</b> ese cliente y cuánto deberá con esta jugada. Si tiene <b>límite de fiado</b> y se pasa, te lo dice (y cuánto más se le puede fiar) y no deja anotar.</li>
     <li>Toca <span class="btn">Anotar jugada</span>.</li>
   </ol>
   <figure><img src="m05-loteria.png" /><figcaption>Anotando una jugada.</figcaption></figure>
+  <div class="key"><b>«¿A quién se le fía?»</b>Si marcas Fiado con un nombre que no es exactamente el de un cliente, la app siempre pregunta antes de anotar. Si escribiste una parte del nombre o con una letra mal («Pedro», «Pedro Gomes»), te muestra los clientes parecidos: toca <span class="btn">Sí, es Pedro Gómez</span> (te dice lo que debe) o <span class="btn">No, es otra persona</span>. Si el nombre es nuevo de verdad, te pregunta <b>«¿Cliente nuevo?»</b>: <span class="btn">Sí, registrar y fiar</span> o <span class="btn">No, voy a corregir el nombre</span>. Así la deuda nunca se va a una cuenta repetida.</div>
+  <figure class="half"><img src="m32-a-quien.png" /><figcaption>La app pregunta a quién se le fía.</figcaption></figure>
 
   <h3>Pagar un premio</h3>
   <ol>
@@ -164,8 +169,8 @@
 
 <section class="chapter">
   <h1>6. Lotería: el cuadre y cerrar el día</h1>
-  <p>Más abajo está <b>«Clientes del día»</b>, tu libreta: cada cliente con cuántas veces jugó, cuánto, cuántas veces cobró premio y cuánto cobró. Al final, el total.</p>
-  <p>Debajo están las listas <b>«Premios pagados»</b> y <b>«Jugadas»</b>, cada una con cuántas son y el total. Si anotaste algo mal:</p>
+  <p>Más abajo está <b>«Clientes del día»</b>, tu libreta: cada cliente con cuántas veces jugó, cuánto, cuántas veces cobró premio y cuánto cobró. Al final, el total. Debajo del nombre de un cliente que te debe, sale <b style="color:#b42318">en rojo lo que debe</b> (de la tienda y de la lotería). Si <b>tocas el nombre</b> de un cliente registrado, se abre su cuenta para ver todo o <b>abonar</b>, sin salir de la Lotería.</p>
+  <p>Debajo están las listas <b>«Premios pagados»</b> y <b>«Jugadas»</b>, cada una con cuántas son y el total. Las jugadas fiadas llevan la etiqueta roja <b style="color:#b42318">Fiado</b>. Si anotaste algo mal:</p>
   <ul>
     <li>toca el <b>lápiz</b> para <b>corregirlo</b> (quién o cuánto): el cuadre y lo que entregas se recalculan solos;</li>
     <li>toca la <b>basurita</b> para <b>anularlo</b>.</li>
@@ -230,11 +235,11 @@
     <li>Toca <span class="btn">Cobrar</span>.</li>
     <li>Escoge cómo paga: <b>Efectivo, Transferencia, Tarjeta o Fiado</b>.</li>
     <li>Si es efectivo, escribe cuánto te dio: la app te dice la <b>devuelta</b>.</li>
-    <li>Si quieres, escribe el cliente o un descuento a toda la venta. <b>Para fiar, el cliente tiene que estar registrado.</b></li>
-    <li>Toca <span class="btn">Cobrar</span>. La mercancía se descuenta sola del inventario.</li>
+    <li>Si quieres, escribe el cliente o un descuento a toda la venta. <b>Para fiar, escribe el nombre del cliente</b>: te dice en grande cuánto debía y cuánto deberá con esta venta (y si se pasa de su límite de fiado). Si escribes solo una parte del nombre, salen los clientes parecidos con lo que debe cada uno. Igual que en la lotería, si el nombre no es exactamente el de un cliente, te pregunta <b>«¿A quién se le fía?»</b> o <b>«¿Cliente nuevo?»</b>.</li>
+    <li>Toca <span class="btn">Cobrar</span> (con Fiado el botón dice <span class="btn">Fiar</span>). La mercancía se descuenta sola del inventario.</li>
   </ol>
   <figure class="half"><img src="m13-cobrar.png" /><figcaption>Cobrar: forma de pago y devuelta.</figcaption></figure>
-  <p>Al final sale el <b>recibo</b>. Lo puedes mandar por <span class="btn">WhatsApp</span> (si el cliente tiene teléfono, le llega directo a él) o con <span class="btn">Compartir</span>.</p>
+  <p>Al final sale el <b>recibo</b>. Lo puedes mandar por <span class="btn">WhatsApp</span> (si el cliente tiene teléfono, le llega directo a él) o con <span class="btn">Compartir</span>. Si fue fiado, el recibo dice también <b>cuánto debe el cliente en total</b>.</p>
   <figure class="half"><img src="m14-recibo.png" /><figcaption>El recibo de la venta.</figcaption></figure>
   <div class="tip"><b>Tranquila con el doble toque</b>Si tocas «Cobrar» dos veces sin querer, la venta se cobra una sola vez.</div>
 </section>
@@ -273,14 +278,19 @@
   <h3>Pendiente por cobrar</h3>
   <p>Arriba en Clientes, y también en Inicio, está el <b>«Pendiente por cobrar»</b>: lo que te deben <b>todos</b> los clientes juntos, de la tienda y de la lotería. Si lo tocas, sale la lista de <b>quién debe y cuánto</b>, del que más debe al que menos. Cada uno tiene su botón <span class="btn">Abonar</span>.</p>
   <figure><img src="m29-pendiente.png" /><figcaption>Pendiente por cobrar y quién debe.</figcaption></figure>
-  <p>El <b>lápiz</b> al lado de cada cliente sirve para <b>editar sus datos</b>: nombre, teléfono, nota o límite de fiado.</p>
+  <p>En la lista, a la derecha de cada cliente sale <b>cuánto debe</b> (o «Nada (al día)»). El <b>lápiz</b> sirve para <b>editar sus datos</b>: nombre, teléfono, nota o límite de fiado. En el teléfono, los botones <span class="btn">Abonar</span> y el lápiz salen debajo del nombre.</p>
+  <ul>
+    <li><b>Buscar:</b> por nombre o por teléfono, con o sin guiones (829-555-0101 o 8295550101). Si no sale en el filtro que tienes, la app te dice dónde está y te da un botón para verlo.</li>
+    <li><b>Archivados:</b> un cliente archivado que debe sigue saliendo en «Todos» y «Deben», con la etiqueta «archivado». Si a un archivado se le vuelve a fiar, vuelve solo a la lista.</li>
+    <li><b>A favor:</b> si un cliente pagó de más (por ejemplo, se anuló una jugada fiada que ya había abonado), sale <b style="color:#15803d">en verde «a favor»</b>. Lo próximo que se le fíe se descuenta de eso.</li>
+  </ul>
 
   <h3>La cuenta de cada cliente</h3>
-  <p>Si tocas un cliente, ves cuánto debe, lo que jugó en la lotería en los últimos 30 días y su <b>cuenta</b>, con cada fiado y cada abono por fecha y lo que <b>quedó debiendo</b> después de cada uno. Arriba de la cuenta escoges <b>Todo</b>, <b>Este mes</b> o <b>Mes pasado</b>.</p>
+  <p>Si tocas un cliente, ves cuánto debe, lo que jugó en la lotería en los últimos 30 días y su <b>cuenta</b>, con cada fiado y cada abono por fecha y lo que <b>quedó debiendo</b> después de cada uno. Arriba de la cuenta escoges <b>Todo</b>, <b>Este mes</b> o <b>Mes pasado</b>. En el teléfono, cada línea de la cuenta sale como una tarjetita.</p>
   <figure><img src="m30-cuenta.png" /><figcaption>La cuenta de un cliente.</figcaption></figure>
   <ul>
     <li><span class="btn">Registrar abono</span>: cuando te paga. Escribe cuánto; la app te dice cuánto le quedará debiendo. Si te pagó ayer o el mes pasado, cambia la <b>Fecha</b>.</li>
-    <li><span class="btn">Anotar deuda a mano</span>: para lo que debía antes de usar la app (lo de la libreta) o algo fiado que no se anotó. Le pones la fecha y de qué es.</li>
+    <li><span class="btn">Anotar deuda a mano</span>: para lo que debía antes de usar la app (lo de la libreta) o algo fiado que no se anotó. Escribe <b>solo lo nuevo</b> que se le anota (la app te muestra cuánto debe ahora y cuánto quedará). Le pones la fecha y de qué es; al escribir «De qué es», te va sugiriendo lo que ya escribiste antes (tocas una sugerencia y se llena sola).</li>
     <li><b>Corregir:</b> en la cuenta, el <b>lápiz</b> corrige un abono o una deuda anotada a mano, de cualquier fecha; la <b>basurita</b> la anula. Lo que debe se recalcula solo. Las dos cosas piden el PIN de la dueña.</li>
     <li>Lo fiado en una venta o una jugada se corrige en <b>Ventas</b> o <b>Lotería</b>, en el día que pasó. La cuenta te dice dónde.</li>
     <li><span class="btn">Recordarle por WhatsApp</span>: le manda un mensaje amable con lo que debe.</li>
@@ -290,7 +300,7 @@
 
 <section class="chapter">
   <h1>10. Ventas: recibos, anular y devolver</h1>
-  <p>Aquí están las ventas de la tienda de cada día, con el total y cuánto entró por cada forma de pago. Con las flechas cambias de día.</p>
+  <p>Aquí están las ventas de la tienda de cada día, con el total y cuánto entró por cada forma de pago. Las ventas fiadas llevan la etiqueta roja <b style="color:#b42318">Fiado</b>. Con las flechas cambias de día.</p>
   <figure><img src="m20-ventas.png" /><figcaption>Las ventas del día.</figcaption></figure>
   <p>Si tocas una venta, ves su recibo y lo puedes volver a mandar. Desde ahí también:</p>
   <ul>
@@ -308,8 +318,9 @@
     <li><b>Lotería:</b> venta, comisión ganada, premios y lo que entregar, día por día.</li>
     <li><b>Tienda:</b> lo vendido, lo que te costó y la <b>ganancia</b>, la venta de cada día y lo que más se vende.</li>
     <li><b>Inventario ahora:</b> cuántos productos hay y cuánto vale la mercancía (al costo y al precio).</li>
-    <li><b>Quién debe más:</b> los clientes con más fiado.</li>
+    <li><b>Quién debe más:</b> cuántos clientes deben, el total y los que más deben. Si tocas uno, vas a la lista para abonar.</li>
   </ul>
+  <p>En el teléfono, Reportes está en <span class="btn">Más</span> y cada fila de las tablas sale como una tarjetita.</p>
   <figure><img src="m22-reportes.png" /><figcaption>Reportes de hoy.</figcaption></figure>
   <p>Los reportes solo los ven la dueña y «solo mirar». El empleado no ve ganancias.</p>
 </section>
