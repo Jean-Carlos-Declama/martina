@@ -7,6 +7,7 @@ import { inventorySummary, periodOf, salesReport } from '../../domain/reports';
 import { useSession } from '../context';
 import { dayLabel, formatQty, plural, shiftDay } from '../format';
 import { Empty, Segmented, Stat } from '../kit';
+import { DeliverStat } from './Lottery';
 
 type Period = 'today' | 'week' | 'month' | 'custom';
 
@@ -56,7 +57,7 @@ export default function Reports() {
               <Stat label="Venta" value={money(lottery.totals.salesCents)} sub={plural(lottery.totals.salesCount, 'jugada', 'jugadas')} />
               <Stat label="Comisión ganada" value={money(lottery.totals.commissionCents)} tone="good" big />
               <Stat label="Premios" value={money(lottery.totals.prizesCents)} tone="bad" sub={plural(lottery.totals.prizesCount, 'pagado', 'pagados')} />
-              <Stat label="A entregar" value={money(lottery.totals.deliverCents)} tone="accent" />
+              <DeliverStat cents={lottery.totals.deliverCents} money={money} />
             </div>
             <div className="table-wrap">
               <table className="table">
@@ -80,7 +81,7 @@ export default function Reports() {
                         {money(d.totals.commissionCents)} <small className="muted">{d.totals.commissionPct}%</small>
                       </td>
                       <td className="num bad-text">{money(d.totals.prizesCents)}</td>
-                      <td className="num">{money(d.totals.deliverCents)}</td>
+                      <td className={`num ${d.totals.deliverCents < 0 ? 'bad-text' : ''}`}>{money(d.totals.deliverCents)}</td>
                     </tr>
                   ))}
                 </tbody>

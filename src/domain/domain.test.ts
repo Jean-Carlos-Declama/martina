@@ -6,7 +6,7 @@ import { exportBackup, importBackup } from './backup';
 import { createClient } from './clients';
 import { BusinessError, dayKeyOf, newId } from './common';
 import { registerPayment } from './credit';
-import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, voidLotterySale, voidPrize } from './lottery';
+import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, updateLotterySale, updatePrize, voidLotterySale, voidPrize } from './lottery';
 import { createProduct, updateProduct } from './products';
 import { salesReport, stockAlerts } from './reports';
 import { createSale, receiptNumber, returnItems, voidSale } from './sales';
@@ -296,6 +296,55 @@ describe('lotería (el cuadre del día)', () => {
     const report = await lotteryReport(w.db, '2000-01-01', today());
     expect(report.totals).toMatchObject({ salesCents: 100000, commissionCents: 10000, prizesCents: 20000, deliverCents: 70000 });
     expect(report.days).toHaveLength(1);
+  });
+
+  it('si los premios pasan la venta, lo que se entrega queda en negativo (faltante)', async () => {
+    const w = await newWorld();
+    await saveSettings({ ...(await getSettings(w.db)), commissionPct: 20 }, w.db);
+    await play(w, 10000, 'Ana'); // vendió 100
+    await prize(w, 12000, 'Ana'); // se sacó 120
+    const t = (await computeDay(w.db, today())).totals;
+    // 100 - 20 de comisión - 120 de premio = -40
+    expect(t).toMatchObject({ salesCents: 10000, commissionCents: 2000, prizesCents: 12000, deliverCents: -4000 });
+  });
+
+  it('editar un premio o una jugada recalcula el cuadre solo; la jugada fiada ajusta la deuda', async () => {
+    const w = await newWorld();
+    const ana = await newClient(w.db, 'Ana');
+    await play(w, 3000, 'Luis');
+    const fiada = await play(w, 2000, '', { clientId: ana, credit: true });
+    const p1 = await prize(w, 1000, 'Luis');
+    await prize(w, 1500, 'Pedro');
+    await prize(w, 2500, 'Juana');
+    expect((await computeDay(w.db, today())).totals).toMatchObject({ prizesCount: 3, prizesCents: 5000 });
+
+    await updatePrize(w.db, p1.id, { clientName: 'Luis', amountCents: 2000 }, w.owner.id);
+    await updateLotterySale(w.db, fiada.id, { clientId: ana, amountCents: 3500 }, w.owner.id);
+    const day = await computeDay(w.db, today());
+    expect(day.totals).toMatchObject({ salesCents: 6500, prizesCount: 3, prizesCents: 6000 });
+    expect(day.totals.deliverCents).toBe(6500 - 650 - 6000);
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(3500);
+    await expect(updateLotterySale(w.db, fiada.id, { clientName: 'Otra', amountCents: 3500 }, w.owner.id)).rejects.toThrow(/anúlala/);
+  });
+
+  it('se puede volver a un día anterior abierto a anotar lo que faltó (no a uno cerrado ni a uno futuro)', async () => {
+    const w = await newWorld();
+    const monday = dayKeyOf(new Date(Date.now() - 3 * 24 * 60 * 60 * 1000));
+    const tomorrow = dayKeyOf(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    await addLotterySale(w.db, { amountCents: 5000, clientName: 'Ana', userId: w.owner.id, requestId: newId(), dayKey: monday });
+    await addPrize(w.db, { amountCents: 2000, clientName: 'Ana', userId: w.owner.id, requestId: newId(), dayKey: monday });
+    expect((await computeDay(w.db, monday)).totals).toMatchObject({ salesCents: 5000, prizesCents: 2000 });
+    expect((await computeDay(w.db, today())).totals.salesCents).toBe(0);
+    await expect(addLotterySale(w.db, { amountCents: 100, clientName: 'Ana', userId: w.owner.id, requestId: newId(), dayKey: tomorrow })).rejects.toThrow(
+      /todavía no ha llegado/,
+    );
+    await closeDay(w.db, monday, w.owner.id);
+    await expect(addLotterySale(w.db, { amountCents: 100, clientName: 'Ana', userId: w.owner.id, requestId: newId(), dayKey: monday })).rejects.toThrow(
+      /ya se cerró/,
+    );
+    await reopenDay(w.db, monday, w.owner.id, 'faltó una jugada');
+    await addLotterySale(w.db, { amountCents: 100, clientName: 'Ana', userId: w.owner.id, requestId: newId(), dayKey: monday });
+    expect((await computeDay(w.db, monday)).totals.salesCents).toBe(5100);
   });
 });
 

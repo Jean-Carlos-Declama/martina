@@ -3,9 +3,16 @@ import { formatMoney } from '../domain/common';
 
 export { formatMoney };
 
-/** Lo que escribe la persona ("1,250.50", "RD$ 300", "75") a centavos. Vacío o inválido = null. */
+/** Monedas que se pueden escoger en Ajustes (cambia el símbolo en toda la app; no convierte cantidades). */
+export const CURRENCIES = [
+  { symbol: 'RD$', label: 'Pesos dominicanos (RD$)' },
+  { symbol: 'US$', label: 'Dólares (US$)' },
+  { symbol: '€', label: 'Euros (€)' },
+];
+
+/** Lo que escribe la persona ("1,250.50", "RD$ 300", "US$ 20", "€ 75") a centavos. Vacío o inválido = null. */
 export function parseMoney(text: string): number | null {
-  const clean = text.replace(/RD\$|\$|\s|,/gi, '');
+  const clean = text.replace(/RD\$|US\$|\$|€|\s|,/gi, '');
   if (!clean) return null;
   const value = Number(clean);
   if (!Number.isFinite(value) || value < 0) return null;

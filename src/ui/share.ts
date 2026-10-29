@@ -45,7 +45,7 @@ export function lotteryDayText(report: DayReport, settings: Settings): string {
     `Venta: ${money(t.salesCents)} (${t.salesCount})`,
     `Comisión ${t.commissionPct}%: ${money(t.commissionCents)}`,
     `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
-    `*A entregar: ${money(t.deliverCents)}*`,
+    t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}* (los premios y la comisión pasaron la venta)` : `*A entregar: ${money(t.deliverCents)}*`,
     report.status === 'closed' ? '(día cerrado)' : '',
   ]
     .join('\n')

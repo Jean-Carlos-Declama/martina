@@ -10,6 +10,7 @@ import { dayLabel, formatQty, plural } from '../format';
 import { Icon } from '../icons';
 import { Stat } from '../kit';
 import { SyncBadge } from './Devices';
+import { DeliverStat } from './Lottery';
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -69,7 +70,7 @@ export function Home({ go }: { go: (screen: Screen) => void }) {
             <Stat label="Venta" value={money(lottery.totals.salesCents)} sub={plural(lottery.totals.salesCount, 'jugada', 'jugadas')} />
             <Stat label={`Comisión ${lottery.totals.commissionPct}%`} value={money(lottery.totals.commissionCents)} tone="good" sub="lo que te ganas" />
             <Stat label="Premios" value={money(lottery.totals.prizesCents)} tone="bad" sub={plural(lottery.totals.prizesCount, 'pagado', 'pagados')} />
-            <Stat label="A entregar" value={money(lottery.totals.deliverCents)} tone="accent" big />
+            <DeliverStat cents={lottery.totals.deliverCents} money={money} />
           </div>
         )}
       </section>

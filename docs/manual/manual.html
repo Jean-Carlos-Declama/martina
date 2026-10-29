@@ -140,7 +140,7 @@
     <tr><th>Venta</th><td>Todo lo que jugaron hoy (y cuántas jugadas).</td></tr>
     <tr><th>Comisión</th><td>Lo que te ganas: el % de la venta del día.</td></tr>
     <tr><th>Premios</th><td>Lo que pagaste a los que se sacaron algo.</td></tr>
-    <tr><th>A entregar</th><td><b>Venta − comisión − premios.</b> Es lo que entregas.</td></tr>
+    <tr><th>A entregar</th><td><b>Venta − comisión − premios.</b> Es lo que entregas. Si da negativo, sale <b style="color:#b42318">en rojo como «Faltante»</b>.</td></tr>
   </table>
 
   <h3>Anotar una jugada</h3>
@@ -155,17 +155,23 @@
   <h3>Pagar un premio</h3>
   <ol>
     <li>Toca la pestaña <span class="btn">Pagar premio</span>.</li>
-    <li>Escribe a quién y <b>cuánto se sacó</b>.</li>
-    <li>Toca <span class="btn">Pagar premio</span>. Se resta de lo que entregas.</li>
+    <li>Escribe <b>quién se lo sacó</b> y <b>cuánto se sacó</b>.</li>
+    <li>Toca <span class="btn">Pagar premio</span>. Se paga del dinero del día y se resta de lo que entregas.</li>
   </ol>
+  <p>Si se sacaron premios varias personas (por ejemplo 10, 15 y 25), anota cada una. En <b>«Premios pagados»</b> ves cuántos premios hubo y el total.</p>
   <figure><img src="m06-loteria-premio.png" /><figcaption>Pagando un premio.</figcaption></figure>
 </section>
 
 <section class="chapter">
   <h1>6. Lotería: el cuadre y cerrar el día</h1>
   <p>Más abajo está <b>«Clientes del día»</b>, tu libreta: cada cliente con cuántas veces jugó, cuánto, cuántas veces cobró premio y cuánto cobró. Al final, el total.</p>
-  <p>Debajo, en <b>«Anotaciones»</b>, está cada jugada y cada premio con su hora. Si anotaste algo mal, toca el ícono de la basurita a su lado para anularlo (pide el PIN de la dueña y el porqué).</p>
-  <figure><img src="m07-loteria-tabla.png" /><figcaption>Clientes del día y anotaciones.</figcaption></figure>
+  <p>Debajo están las listas <b>«Premios pagados»</b> y <b>«Jugadas»</b>, cada una con cuántas son y el total. Si anotaste algo mal:</p>
+  <ul>
+    <li>toca el <b>lápiz</b> para <b>corregirlo</b> (quién o cuánto): el cuadre y lo que entregas se recalculan solos;</li>
+    <li>toca la <b>basurita</b> para <b>anularlo</b>.</li>
+  </ul>
+  <p>Las dos cosas piden el PIN de la dueña.</p>
+  <figure><img src="m07-loteria-tabla.png" /><figcaption>Clientes del día, premios pagados y jugadas.</figcaption></figure>
 
   <h3>Ejemplo como en la libreta</h3>
   <table class="example">
@@ -174,16 +180,28 @@
     <tr><td>Premios pagados</td><td>− RD$ 200.00</td></tr>
     <tr class="total"><td>A entregar</td><td>RD$ 700.00</td></tr>
   </table>
+  <h3>Cuando los premios pasan la venta (faltante)</h3>
+  <p>Si vendiste 100, tu comisión es 20 y alguien se sacó 120, la cuenta da 100 − 20 − 120 = <b style="color:#b42318">−40</b>. La app lo muestra <b>en rojo como «Faltante»</b>: es lo que falta, no lo que entregas.</p>
+  <figure class="half"><img src="m27-faltante.png" /><figcaption>Un día con faltante.</figcaption></figure>
+
+  <h3>Volver a un día anterior para corregir</h3>
+  <p>Si el cuadre del lunes quedó mal, puedes volver a ese día y anotar lo que faltó:</p>
+  <ol>
+    <li>Usa la flecha ‹ al lado de la fecha, o toca el <b>calendario</b> y escoge el día. Con <span class="btn">Hoy</span> vuelves.</li>
+    <li>Si ese día está <b>cerrado</b>, la dueña lo abre con <span class="btn">Reabrir para corregir</span>.</li>
+    <li>Anota la jugada o el premio como siempre. Arriba sale un aviso amarillo para que sepas que no estás en hoy.</li>
+    <li>Cuando termines, cierra ese día otra vez.</li>
+  </ol>
+  <figure class="half"><img src="m28-dia-anterior.png" /><figcaption>Anotando en el lunes para corregir su cuadre.</figcaption></figure>
 
   <h3>Otras cosas de esta pantalla</h3>
   <ul>
     <li><b>Cambiar la comisión de un día:</b> toca el cuadro de la comisión. El % que pongas en Ajustes es el que usa cada día nuevo.</li>
-    <li><b>Ver otro día:</b> usa las flechas ‹ › al lado de la fecha; <span class="btn">Hoy</span> te devuelve.</li>
     <li><b>Mandar el cuadre:</b> <span class="btn">Enviar cuadre</span> lo manda por WhatsApp (o lo que escojas) con cada cliente y los totales.</li>
   </ul>
 
   <h3>Cerrar el día</h3>
-  <p>Al terminar, toca <span class="btn">Cerrar el día</span>. Te muestra el resumen y, si estás de acuerdo, lo cierra. Un día cerrado <b>ya no se puede cambiar</b>: no se anota ni se anula nada en él. Si hay que corregir algo, la dueña lo puede <span class="btn">Reabrir</span> y tiene que escribir el porqué.</p>
+  <p>Al terminar, toca <span class="btn">Cerrar el día</span>. Te muestra el resumen y, si estás de acuerdo, lo cierra. Un día cerrado <b>ya no se puede cambiar</b>: no se anota ni se anula nada en él. Si hay que corregir algo, la dueña lo puede <span class="btn">Reabrir para corregir</span> y tiene que escribir el porqué.</p>
   <figure class="half"><img src="m08-cerrar-dia.png" /><figcaption>Confirmar el cierre del día.</figcaption></figure>
   <div class="tip"><b>La tienda va aparte</b>Cerrar la lotería no frena las ventas de la tienda.</div>
 </section>
@@ -316,7 +334,7 @@
   <ul>
     <li><b>Equipos:</b> vincular, ver y quitar equipos (capítulo 12).</li>
     <li><b>Respaldo:</b> <span class="btn">Guardar respaldo</span> hace un archivo con todo (para guardarlo en Archivos/iCloud o mandártelo por WhatsApp). <span class="btn">Recuperar un respaldo</span> pone lo del archivo en lugar de lo que hay. Úsalo con cuidado.</li>
-    <li><b>Negocio:</b> el nombre, lo que sale al final del recibo, tu <b>comisión</b> de lotería, la lista de <b>loterías que vendes</b> (si la pones, al anotar escoges de cuál es y el cuadre las separa), el ITBIS y si se puede vender sin existencia.</li>
+    <li><b>Negocio:</b> el nombre, lo que sale al final del recibo, la <b>moneda</b> (pesos RD$, dólares US$ o euros €; solo cambia el símbolo), tu <b>comisión</b> de lotería, la lista de <b>loterías que vendes</b> (si la pones, al anotar escoges de cuál es y el cuadre las separa), el ITBIS y si se puede vender sin existencia.</li>
     <li><b>Seguridad:</b> <span class="btn">Cambiar mi PIN</span>, cada cuánto se bloquea sola, y las personas que usan la app.</li>
     <li><b>Categorías y proveedores:</b> para organizar los productos.</li>
     <li><b>Bitácora:</b> lo último que se hizo y quién lo hizo (anulaciones, cierres, cambios de precio…).</li>
@@ -352,7 +370,7 @@
   <h3>¿Puedo borrar el ícono de la app?</h3>
   <p>Si el equipo está vinculado, se puede volver a vincular y bajar todo. Si no está vinculado, <b>borrar el ícono borra todo</b>: haz un respaldo antes.</p>
   <h3>Anoté algo mal en la lotería</h3>
-  <p>Mientras el día esté abierto, anúlalo con la basurita y anótalo bien. Si el día ya está cerrado, la dueña lo reabre, lo corrige y lo vuelve a cerrar.</p>
+  <p>Mientras el día esté abierto, corrígelo con el lápiz (o anúlalo con la basurita). Si el día ya está cerrado, la dueña lo reabre, lo corrige y lo vuelve a cerrar. También puedes volver a un día anterior con el calendario y anotar lo que faltó.</p>
   <h3>Se me olvidó el PIN</h3>
   <p>Si eres empleado, la dueña te pone uno nuevo en Ajustes › Seguridad. Si eres la dueña, avísale a Jean Carlos.</p>
 </section>

@@ -46,17 +46,28 @@ export interface LotteryInput {
   userId: Id;
   /** Llave única (se genera al abrir el formulario): el doble toque no anota dos veces. */
   requestId: string;
+  /** Día del cuadre (AAAA-MM-DD). Vacío = hoy; un día anterior sirve para corregir un cuadre (si sigue abierto). */
+  dayKey?: string;
 }
 
-/** Anota lo que jugó un cliente hoy. */
+/** El día donde se anota: hoy, o uno anterior para corregir (nunca uno que no ha llegado). */
+function targetDay(dayKey?: string): string {
+  const today = dayKeyOf();
+  if (!dayKey) return today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) throw new BusinessError('Ese día no es válido.');
+  if (dayKey > today) throw new BusinessError('No se puede anotar en un día que todavía no ha llegado.');
+  return dayKey;
+}
+
+/** Anota lo que jugó un cliente (hoy, o en un día anterior que siga abierto). */
 export async function addLotterySale(database: MartinaDb, input: LotteryInput): Promise<LotteryEntry> {
   if (!(input.amountCents > 0)) throw new BusinessError('La cantidad tiene que ser mayor que cero.');
   if (input.credit && !input.clientId) throw new BusinessError('Para fiar hay que escoger el cliente.');
+  const dayKey = targetDay(input.dayKey);
   const tables = [database.lottery, database.days, database.settings, database.clients, database.credit, database.audit];
   return database.transaction('rw', tables, async () => {
     const repeated = await database.lottery.where('requestId').equals(input.requestId).first();
     if (repeated) return repeated;
-    const dayKey = dayKeyOf();
     await ensureDayOpen(database, dayKey);
     const entry: LotteryEntry = {
       id: newId(),
@@ -74,7 +85,36 @@ export async function addLotterySale(database: MartinaDb, input: LotteryInput): 
     };
     await database.lottery.add(entry);
     if (entry.credit) await addCredit(database, entry.clientId!, entry.amountCents, 'lottery', input.userId, entry.id, entry.lottery);
+    if (dayKey !== dayKeyOf()) await audit(database, input.userId, 'anotar en día anterior', 'lotería', entry.id, `${dayKey} · ${entry.clientName}: ${entry.amountCents / 100}`);
     return entry;
+  });
+}
+
+/** Lo que se puede corregir de una jugada o un premio. */
+export interface EntryChanges {
+  clientId?: Id;
+  clientName?: string;
+  amountCents: number;
+  lottery?: string;
+}
+
+/** Corrige una jugada mal anotada (cliente, monto o lotería) mientras su día está abierto: el cuadre se recalcula solo. */
+export async function updateLotterySale(database: MartinaDb, entryId: Id, changes: EntryChanges, userId: Id): Promise<void> {
+  if (!(changes.amountCents > 0)) throw new BusinessError('La cantidad tiene que ser mayor que cero.');
+  const tables = [database.lottery, database.days, database.settings, database.clients, database.credit, database.audit];
+  await database.transaction('rw', tables, async () => {
+    const entry = await database.lottery.get(entryId);
+    if (!entry || entry.status === 'void') throw new BusinessError('Esa jugada no existe o ya está anulada.');
+    await ensureDayOpen(database, entry.dayKey);
+    if (entry.credit && changes.clientId !== entry.clientId)
+      throw new BusinessError(`Esa jugada se le fió a ${entry.clientName}: para cambiar el cliente, anúlala y anótala otra vez.`);
+    const clientName = await nameFor(database, changes.clientId, changes.clientName);
+    const amount = Math.round(changes.amountCents);
+    await database.lottery.update(entryId, { clientId: changes.clientId, clientName, amountCents: amount, lottery: changes.lottery?.trim() || undefined });
+    // Si era fiada, a la cuenta del cliente se le suma o resta la diferencia.
+    if (entry.credit && entry.clientId && amount !== entry.amountCents)
+      await addCredit(database, entry.clientId, amount - entry.amountCents, 'adjust', userId, entry.id, 'Lotería corregida');
+    await audit(database, userId, 'corregir', 'lotería', entryId, `${entry.clientName} ${entry.amountCents / 100} → ${clientName} ${amount / 100}`);
   });
 }
 
@@ -101,15 +141,17 @@ export interface PrizeInput {
   note?: string;
   userId: Id;
   requestId: string;
+  /** Día del cuadre (vacío = hoy). */
+  dayKey?: string;
 }
 
-/** Paga un premio a un cliente (resta en el cuadre de hoy). */
+/** Paga un premio a un cliente: sale del dinero del día y resta de lo que se entrega. */
 export async function addPrize(database: MartinaDb, input: PrizeInput): Promise<Prize> {
   if (!(input.amountCents > 0)) throw new BusinessError('El premio tiene que ser mayor que cero.');
+  const dayKey = targetDay(input.dayKey);
   return database.transaction('rw', [database.prizes, database.days, database.clients, database.settings, database.audit], async () => {
     const repeated = await database.prizes.where('requestId').equals(input.requestId).first();
     if (repeated) return repeated;
-    const dayKey = dayKeyOf();
     await ensureDayOpen(database, dayKey);
     const prize: Prize = {
       id: newId(),
@@ -125,8 +167,22 @@ export async function addPrize(database: MartinaDb, input: PrizeInput): Promise<
       requestId: input.requestId,
     };
     await database.prizes.add(prize);
-    await audit(database, input.userId, 'premio', 'premio', prize.id, `${prize.clientName}: ${prize.amountCents / 100}`);
+    await audit(database, input.userId, 'premio', 'premio', prize.id, `${dayKey} · ${prize.clientName}: ${prize.amountCents / 100}`);
     return prize;
+  });
+}
+
+/** Corrige un premio (quién o cuánto) mientras su día está abierto: lo que se entrega se recalcula solo. */
+export async function updatePrize(database: MartinaDb, prizeId: Id, changes: EntryChanges, userId: Id): Promise<void> {
+  if (!(changes.amountCents > 0)) throw new BusinessError('El premio tiene que ser mayor que cero.');
+  await database.transaction('rw', database.prizes, database.days, database.clients, database.settings, database.audit, async () => {
+    const prize = await database.prizes.get(prizeId);
+    if (!prize || prize.status === 'void') throw new BusinessError('Ese premio no existe o ya está anulado.');
+    await ensureDayOpen(database, prize.dayKey);
+    const clientName = await nameFor(database, changes.clientId, changes.clientName);
+    const amount = Math.round(changes.amountCents);
+    await database.prizes.update(prizeId, { clientId: changes.clientId, clientName, amountCents: amount, lottery: changes.lottery?.trim() || undefined });
+    await audit(database, userId, 'corregir', 'premio', prizeId, `${prize.clientName} ${prize.amountCents / 100} → ${clientName} ${amount / 100}`);
   });
 }
 

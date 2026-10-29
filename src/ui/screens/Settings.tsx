@@ -8,7 +8,7 @@ import { deleteCategory, saveCategory, saveSupplier } from '../../domain/catalog
 import { BusinessError, dayKeyOf, nowIso } from '../../domain/common';
 import { changePin, createUser, resetPin, setUserActive } from '../../domain/users';
 import { useSession, useUi } from '../context';
-import { formatDateTime, ROLE_LABELS } from '../format';
+import { CURRENCIES, formatDateTime, ROLE_LABELS } from '../format';
 import { Icon } from '../icons';
 import { Field, Modal } from '../kit';
 import { shareOrDownload } from '../share';
@@ -63,6 +63,17 @@ function BusinessSection() {
         <Field label="Nombre del negocio">{id => <input id={id} value={form.businessName} onChange={e => set('businessName', e.target.value)} />}</Field>
         <Field label="Al final del recibo">{id => <input id={id} value={form.receiptFooter} onChange={e => set('receiptFooter', e.target.value)} />}</Field>
       </div>
+      <Field label="Moneda" hint="Cambia el símbolo del dinero en toda la app y en los recibos. No convierte las cantidades ya anotadas.">
+        {id => (
+          <select id={id} value={form.currency} onChange={e => set('currency', e.target.value)}>
+            {[...CURRENCIES, ...(CURRENCIES.some(c => c.symbol === form.currency) ? [] : [{ symbol: form.currency, label: form.currency }])].map(c => (
+              <option key={c.symbol} value={c.symbol}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
       <h3>Lotería</h3>
       <div className="row2">
         <Field label="Comisión (%)" hint="El % de la venta de lotería que te ganas. Se usa en cada día nuevo; un día abierto se cambia en su cuadre.">

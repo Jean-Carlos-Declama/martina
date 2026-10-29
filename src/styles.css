@@ -1262,3 +1262,25 @@ button.chip {
   width: min(320px, 100%);
   height: auto;
 }
+
+/* Saltar a otro día con el calendario (el campo de fecha queda invisible encima del ícono). */
+.date-jump {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  color: var(--text-2);
+}
+.date-jump input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}

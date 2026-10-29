@@ -60,6 +60,7 @@ Una app para el iPad de Martina con dos partes:
 - **Dinero:** siempre en **centavos enteros**, para que no haya errores de decimales. Se muestra como `RD$ 1,234.50`.
 - **Cantidades:** pueden llevar hasta 3 decimales (libras, litros) y se redondean después de cada operación.
 - **ITBIS:** los precios ya lo incluyen. El recibo muestra cuánto ITBIS va dentro, y solo si se activa en Ajustes.
+- **Moneda:** en Ajustes se escoge RD$, US$ o €. Cambia **solo el símbolo** en toda la app y en los recibos; no convierte las cantidades ya anotadas. No se manejan dos monedas a la vez.
 
 ## 4. Inventario
 
@@ -87,7 +88,11 @@ Una app para el iPad de Martina con dos partes:
 - **El cuadre del día:**
   - **Comisión** = % de la venta del día. Ese % se guarda **en cada día**, para que cambiarlo después no altere los días viejos.
   - **A entregar** = venta − comisión − premios.
+  - **Faltante:** si los premios y la comisión pasan la venta, la cuenta da negativo (vende 100, comisión 20, premio 120 → −40). Se muestra **en rojo como «Faltante»** en el cuadre, en Inicio, en Reportes y en el mensaje de WhatsApp.
   - La tabla de clientes junta los nombres aunque se escriban distinto («Pedro», «pedro »).
+  - Abajo hay dos listas: **«Premios pagados»** (quién se sacó qué) y **«Jugadas»**. Cada una muestra cuántas son y el total.
+- **Corregir:** una jugada o un premio se corrige (cliente, monto, lotería) con el lápiz, mientras su día esté abierto, y el cuadre se recalcula solo. Si la jugada era fiada, se ajusta la diferencia en la cuenta del cliente; su cliente no se cambia, se anula y se anota otra vez. Pide el PIN de la dueña y queda en la bitácora.
+- **Días anteriores:** con las flechas o el calendario se va a un día anterior y se anotan jugadas o premios que faltaron, si ese día sigue abierto. Si está cerrado, la dueña lo reabre. Un empleado necesita el PIN de la dueña. No se puede anotar en días que no han llegado. Al cambiar de día, el formulario empieza limpio.
 - **Cierre:** solo la dueña cierra el día. Se guardan los totales y ya no se puede anotar ni anular nada de ese día. Para corregir, ella lo reabre y tiene que dar un motivo (queda en la bitácora). El cierre de la lotería **no** frena las ventas de la tienda.
 - **Fiado:** la lotería fiada va a la misma cuenta del cliente que el fiado de la tienda, y se paga con abonos.
 
