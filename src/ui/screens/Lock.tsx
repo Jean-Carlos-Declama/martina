@@ -158,6 +158,7 @@ export function Lock({ onUnlock }: { onUnlock: (user: User) => void }) {
             )}
           </>
         )}
+        <small className="muted">Versión {__APP_VERSION__}</small>
       </div>
     </main>
   );

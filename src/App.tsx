@@ -65,7 +65,7 @@ export default function App({ startError }: { startError?: unknown }) {
       ) : (
         <Lock onUnlock={setUser} />
       )}
-      <UpdateBanner />
+      <UpdateBanner busy={!!user} />
     </UiProvider>
   );
 }
@@ -160,17 +160,26 @@ function Shell() {
   );
 }
 
-/** Cuando hay una versión nueva de la app, avisa; se instala cuando ella toca el botón (no a mitad de una venta). */
-function UpdateBanner() {
+/**
+ * Versión nueva de la app: si no hay nadie adentro (pantalla del PIN o la bienvenida) se instala sola; si alguien
+ * está trabajando, avisa arriba y se instala cuando toca el botón (así nunca se recarga a mitad de una venta).
+ */
+function UpdateBanner({ busy }: { busy: boolean }) {
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_url, registration) {
-      // Buscar versión nueva cada hora (además de cada vez que se abre la app).
-      if (registration) setInterval(() => void registration.update(), 60 * 60 * 1000);
+      if (!registration) return;
+      // Buscar versión nueva al abrir, al volver a la app y cada hora.
+      void registration.update();
+      document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void registration.update());
+      setInterval(() => void registration.update(), 60 * 60 * 1000);
     },
   });
+  useEffect(() => {
+    if (needRefresh && !busy) void updateServiceWorker(true);
+  }, [needRefresh, busy, updateServiceWorker]);
   if (!needRefresh) return null;
   return (
     <div className="update-banner" role="status">
