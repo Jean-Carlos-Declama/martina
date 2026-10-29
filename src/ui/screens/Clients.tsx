@@ -4,7 +4,7 @@ import { db } from '../../db/database';
 import type { Client, CreditEntry } from '../../db/types';
 import { createClient, setClientActive, updateClient } from '../../domain/clients';
 import { dayKeyOf } from '../../domain/common';
-import { registerPayment } from '../../domain/credit';
+import { addCharge, clientAccount, registerPayment, updateCreditEntry, voidCreditEntry, type AccountLine } from '../../domain/credit';
 import { normalize } from '../../domain/products';
 import { useSession, useUi } from '../context';
 import { formatDateTime, moneyField, parseMoney, plural, shiftDay } from '../format';
@@ -16,16 +16,18 @@ const CREDIT_LABELS: Record<CreditEntry['kind'], string> = {
   sale: 'Fiado (tienda)',
   lottery: 'Fiado (lotería)',
   payment: 'Abono',
+  charge: 'Deuda anotada a mano',
   saleVoid: 'Venta anulada',
   adjust: 'Devolución / anulación',
 };
 
-export default function Clients() {
-  const { money, canEdit } = useSession();
+export default function Clients({ initialFilter = 'all' }: { initialFilter?: 'all' | 'debt' }) {
+  const { money, canEdit, user } = useSession();
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'debt' | 'archived'>('all');
+  const [filter, setFilter] = useState<'all' | 'debt' | 'archived'>(initialFilter);
   const [editing, setEditing] = useState<Client | 'new' | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [paying, setPaying] = useState<Client | null>(null);
   const clients = useLiveQuery(() => db.clients.toArray(), []);
 
   const shown = useMemo(() => {
@@ -35,21 +37,28 @@ export default function Clients() {
       .filter(c => !needle || normalize(c.name).includes(needle) || c.phone?.includes(needle))
       .sort((a, b) => (filter === 'debt' ? b.balanceCents - a.balanceCents : a.name.localeCompare(b.name, 'es')));
   }, [clients, search, filter]);
-  const totalDebt = (clients ?? []).reduce((sum, c) => sum + Math.max(0, c.balanceCents), 0);
+  const debtors = (clients ?? []).filter(c => c.active && c.balanceCents > 0);
+  const totalDebt = debtors.reduce((sum, c) => sum + c.balanceCents, 0);
 
   return (
     <div className="page">
       <header className="page-head">
-        <div>
-          <h1>Clientes</h1>
-          <p className="muted">Fiado por cobrar: {money(totalDebt)}</p>
-        </div>
+        <h1>Clientes</h1>
         {canEdit && (
           <button className="btn primary" onClick={() => setEditing('new')}>
             <Icon name="plus" /> Nuevo cliente
           </button>
         )}
       </header>
+      <button className="stat-button" onClick={() => setFilter('debt')} title="Ver quién debe">
+        <Stat
+          label="Pendiente por cobrar"
+          value={money(totalDebt)}
+          tone={totalDebt > 0 ? 'bad' : 'plain'}
+          big
+          sub={totalDebt > 0 ? `${plural(debtors.length, 'cliente debe', 'clientes deben')} · toca para ver quiénes` : 'nadie debe'}
+        />
+      </button>
       <div className="toolbar">
         <div className="search-bar">
           <Icon name="search" />
@@ -60,7 +69,7 @@ export default function Clients() {
           onChange={setFilter}
           options={[
             { value: 'all', label: 'Todos' },
-            { value: 'debt', label: 'Deben' },
+            { value: 'debt', label: `Deben${debtors.length ? ` (${debtors.length})` : ''}` },
             { value: 'archived', label: 'Archivados' },
           ]}
         />
@@ -80,10 +89,21 @@ export default function Clients() {
                   {c.balanceCents > 0 ? `debe ${money(c.balanceCents)}` : c.balanceCents < 0 ? `a favor ${money(-c.balanceCents)}` : 'al día'}
                 </span>
               </button>
+              {canEdit && c.balanceCents > 0 && (
+                <button className="btn small primary" onClick={() => setPaying(c)}>
+                  Abonar
+                </button>
+              )}
+              {canEdit && (
+                <button className="icon-btn" onClick={() => setEditing(c)} aria-label={`Editar los datos de ${c.name}`} title="Editar datos">
+                  <Icon name="edit" size={20} />
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
+      {paying && <PaymentModal client={paying} userId={user.id} onClose={() => setPaying(null)} />}
       {editing && <ClientForm client={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
       {viewing && (
         <ClientDetail
@@ -146,12 +166,26 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   );
 }
 
+type Period = 'all' | 'month' | 'last';
+
+/** El mes de una fecha (AAAA-MM) y el del mes pasado. */
+const monthOf = (iso: string) => dayKeyOf(new Date(iso)).slice(0, 7);
+function lastMonthKey(): string {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() - 1);
+  return dayKeyOf(date).slice(0, 7);
+}
+
 function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: (client: Client) => void }) {
   const { money, settings, user, canEdit, requireOwner } = useSession();
-  const { run } = useUi();
+  const { run, askText } = useUi();
   const [paying, setPaying] = useState(false);
+  const [charging, setCharging] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<{ entry: AccountLine; ownerId: string } | null>(null);
+  const [period, setPeriod] = useState<Period>('all');
   const client = useLiveQuery(() => db.clients.get(id), [id]);
-  const history = useLiveQuery(() => db.credit.where('[clientId+date]').between([id, ''], [id, '￿']).reverse().limit(100).toArray(), [id]);
+  const account = useLiveQuery(() => clientAccount(db, id), [id]);
   const lottery = useLiveQuery(async () => {
     const since = shiftDay(dayKeyOf(), -30);
     const plays = (await db.lottery.where('clientId').equals(id).toArray()).filter(e => e.status === 'done' && e.dayKey >= since);
@@ -163,7 +197,29 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
       prizesCents: prizes.reduce((s, p) => s + p.amountCents, 0),
     };
   }, [id]);
+  const shown = useMemo(() => {
+    const thisMonth = dayKeyOf().slice(0, 7);
+    const wanted = period === 'month' ? thisMonth : period === 'last' ? lastMonthKey() : null;
+    return (account ?? []).filter(line => !wanted || monthOf(line.date) === wanted).reverse();
+  }, [account, period]);
   if (!client) return null;
+
+  const startEdit = async (entry: AccountLine) => {
+    const owner = await requireOwner('Corregir la cuenta: autorización de la dueña');
+    if (owner) setEditingEntry({ entry, ownerId: owner.id });
+  };
+  const cancelEntry = async (entry: AccountLine) => {
+    const owner = await requireOwner('Anular: autorización de la dueña');
+    if (!owner) return;
+    const reason = await askText({
+      title: entry.kind === 'payment' ? 'Anular abono' : 'Anular deuda',
+      message: `${formatDateTime(entry.date)} · ${money(Math.abs(entry.amountCents))}`,
+      label: '¿Por qué se anula?',
+      okText: 'Anular',
+      danger: true,
+    });
+    if (reason) await run(() => voidCreditEntry(db, entry.id, owner.id, reason), 'Anulado: la cuenta se recalculó');
+  };
 
   return (
     <Modal
@@ -183,14 +239,14 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
               {client.active ? 'Archivar' : 'Reactivar'}
             </button>
             <button className="btn" onClick={() => onEdit(client)}>
-              <Icon name="edit" /> Editar
+              <Icon name="edit" /> Editar datos
             </button>
           </>
         )
       }
     >
       <div className="stats">
-        <Stat label="Debe" value={money(Math.max(0, client.balanceCents))} tone={client.balanceCents > 0 ? 'bad' : 'plain'} big />
+        <Stat label="Pendiente por cobrar" value={money(Math.max(0, client.balanceCents))} tone={client.balanceCents > 0 ? 'bad' : 'plain'} big />
         {client.creditLimitCents && <Stat label="Límite de fiado" value={money(client.creditLimitCents)} />}
         {lottery && <Stat label="Lotería (30 días)" value={money(lottery.playsCents)} sub={`${plural(lottery.plays, 'jugada', 'jugadas')} · ${plural(lottery.prizes, 'premio', 'premios')} (${money(lottery.prizesCents)})`} />}
       </div>
@@ -203,13 +259,32 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
           <button className="btn primary" disabled={client.balanceCents <= 0} onClick={() => setPaying(true)}>
             <Icon name="download" /> Registrar abono
           </button>
+          <button
+            className="btn"
+            onClick={async () => {
+              if (await requireOwner('Anotar deuda: autorización de la dueña')) setCharging(true);
+            }}
+          >
+            <Icon name="plus" /> Anotar deuda a mano
+          </button>
           <button className="btn whatsapp" disabled={client.balanceCents <= 0} onClick={() => openWhatsApp(debtText(client, settings), client.phone)}>
             <Icon name="chat" /> Recordarle por WhatsApp
           </button>
         </div>
       )}
-      <h3>Cuenta</h3>
-      {history && history.length > 0 ? (
+      <div className="card-head">
+        <h3>Cuenta</h3>
+        <Segmented
+          value={period}
+          onChange={setPeriod}
+          options={[
+            { value: 'all', label: 'Todo' },
+            { value: 'month', label: 'Este mes' },
+            { value: 'last', label: 'Mes pasado' },
+          ]}
+        />
+      </div>
+      {shown.length > 0 ? (
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -218,31 +293,63 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
                 <th>Qué</th>
                 <th className="num">Monto</th>
                 <th className="num">Quedó debiendo</th>
+                {canEdit && <th />}
               </tr>
             </thead>
             <tbody>
-              {history.map(h => (
-                <tr key={h.id}>
-                  <td>{formatDateTime(h.date)}</td>
-                  <td>
-                    {CREDIT_LABELS[h.kind]}
-                    {h.note ? <small className="muted"> · {h.note}</small> : null}
-                  </td>
-                  <td className={`num ${h.amountCents > 0 ? 'bad-text' : 'good-text'}`}>
-                    {h.amountCents > 0 ? '+' : '−'}
-                    {money(Math.abs(h.amountCents))}
-                  </td>
-                  <td className="num">{money(h.balanceAfterCents)}</td>
-                </tr>
-              ))}
+              {shown.map(h => {
+                const manual = h.kind === 'payment' || h.kind === 'charge';
+                return (
+                  <tr key={h.id} className={h.status === 'void' ? 'voided' : ''}>
+                    <td>{formatDateTime(h.date)}</td>
+                    <td>
+                      {CREDIT_LABELS[h.kind]}
+                      {h.note ? <small className="muted"> · {h.note}</small> : null}
+                      {h.status === 'void' ? <small className="muted"> · ANULADO</small> : null}
+                      {canEdit && !manual && h.status !== 'void' && <small className="muted"> · se corrige en {h.kind === 'lottery' ? 'Lotería' : 'Ventas'}</small>}
+                    </td>
+                    <td className={`num ${h.amountCents > 0 ? 'bad-text' : 'good-text'}`}>
+                      {h.amountCents > 0 ? '+' : '−'}
+                      {money(Math.abs(h.amountCents))}
+                    </td>
+                    <td className="num">{money(h.runningCents)}</td>
+                    {canEdit && (
+                      <td className="row-actions">
+                        {manual && h.status !== 'void' && (
+                          <>
+                            <button className="icon-btn" onClick={() => void startEdit(h)} aria-label="Corregir">
+                              <Icon name="edit" size={18} />
+                            </button>
+                            <button className="icon-btn" onClick={() => void cancelEntry(h)} aria-label="Anular">
+                              <Icon name="trash" size={18} />
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       ) : (
-        <p className="muted">Nunca ha cogido fiado.</p>
+        <p className="muted">{account?.length ? 'Nada en ese mes.' : 'Nunca ha cogido fiado.'}</p>
       )}
       {paying && <PaymentModal client={client} userId={user.id} onClose={() => setPaying(false)} />}
+      {charging && <ChargeModal client={client} userId={user.id} onClose={() => setCharging(false)} />}
+      {editingEntry && <EditCreditModal entry={editingEntry.entry} client={client} ownerId={editingEntry.ownerId} onClose={() => setEditingEntry(null)} />}
     </Modal>
+  );
+}
+
+/** El día de un abono o una deuda: hoy, o uno anterior (ayer, el mes pasado...). */
+function DayField({ value, onChange }: { value: string; onChange: (dayKey: string) => void }) {
+  const today = dayKeyOf();
+  return (
+    <Field label="Fecha" hint={value !== today ? 'Se anota con esa fecha' : undefined}>
+      {id => <input id={id} type="date" value={value} max={today} onChange={e => e.target.value && e.target.value <= today && onChange(e.target.value)} />}
+    </Field>
   );
 }
 
@@ -251,7 +358,9 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
   const { run } = useUi();
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [day, setDay] = useState(dayKeyOf());
   const cents = parseMoney(amount);
+  const left = client.balanceCents - (cents ?? 0);
   return (
     <Modal
       title={`Abono de ${client.name}`}
@@ -263,9 +372,13 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
           </button>
           <button
             className="btn primary"
-            disabled={!cents}
+            disabled={!cents || left < 0}
             onClick={async () => {
-              if (cents && (await run(() => registerPayment(db, client.id, cents, userId, note), `Abono de ${money(cents)} registrado`))) onClose();
+              const done = await run(
+                () => registerPayment(db, client.id, cents!, userId, note, day),
+                left > 0 ? `Abono de ${money(cents!)}: ${client.name} queda debiendo ${money(left)}` : `${client.name} pagó todo`,
+              );
+              if (done) onClose();
             }}
           >
             Registrar abono
@@ -273,14 +386,103 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
         </>
       }
     >
-      <p>Debe {money(client.balanceCents)}.</p>
-      <div className="row2">
+      <div className="stats">
+        <Stat label="Debe ahora" value={money(client.balanceCents)} tone="bad" />
+        <Stat label="Después del abono" value={cents ? money(Math.max(0, left)) : '—'} tone={cents && left === 0 ? 'good' : 'plain'} big sub={left < 0 ? 'Es más de lo que debe' : undefined} />
+      </div>
+      <div className="row3">
         <Field label="Cuánto abona">{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+        <DayField value={day} onChange={setDay} />
         <Field label="Nota (opcional)">{id => <input id={id} value={note} onChange={e => setNote(e.target.value)} />}</Field>
       </div>
       <button className="btn small" onClick={() => setAmount((client.balanceCents / 100).toFixed(2))}>
         Lo paga todo
       </button>
+    </Modal>
+  );
+}
+
+/** Anotar a mano algo que el cliente debe (ej. lo que traía de la libreta), con su fecha. */
+function ChargeModal({ client, userId, onClose }: { client: Client; userId: string; onClose: () => void }) {
+  const { money, settings } = useSession();
+  const { run } = useUi();
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [day, setDay] = useState(dayKeyOf());
+  const cents = parseMoney(amount);
+  return (
+    <Modal
+      title={`Anotar deuda de ${client.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className="btn primary"
+            disabled={!cents || !note.trim()}
+            onClick={async () => {
+              const done = await run(() => addCharge(db, client.id, cents!, userId, note, day), `Anotado: ${client.name} debe ${money(client.balanceCents + cents!)}`);
+              if (done) onClose();
+            }}
+          >
+            Anotar deuda
+          </button>
+        </>
+      }
+    >
+      <p className="muted">Para lo que debía antes de usar la app, o algo que se fió y no se anotó. Lo de una venta o una jugada se anota allá.</p>
+      <div className="row3">
+        <Field label="Cuánto debe">{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+        <DayField value={day} onChange={setDay} />
+        <Field label="De qué es">{id => <input id={id} value={note} onChange={e => setNote(e.target.value)} placeholder="Ej. lo que debía en la libreta" />}</Field>
+      </div>
+    </Modal>
+  );
+}
+
+/** Corregir un abono o una deuda a mano (monto, fecha, nota): lo que debe se recalcula solo. */
+function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLine; client: Client; ownerId: string; onClose: () => void }) {
+  const { money, settings } = useSession();
+  const { run } = useUi();
+  const isPayment = entry.kind === 'payment';
+  const [amount, setAmount] = useState(moneyField(Math.abs(entry.amountCents)));
+  const [day, setDay] = useState(dayKeyOf(new Date(entry.date)));
+  const [note, setNote] = useState(entry.note ?? '');
+  const cents = parseMoney(amount);
+  const diff = cents ? (isPayment ? -cents : cents) - entry.amountCents : 0;
+  return (
+    <Modal
+      title={isPayment ? 'Corregir abono' : 'Corregir deuda'}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className="btn primary"
+            disabled={!cents || (!isPayment && !note.trim())}
+            onClick={async () => {
+              const done = await run(async () => (await updateCreditEntry(db, entry.id, { amountCents: cents!, dayKey: day, note }, ownerId), true), 'Corregido: la cuenta se recalculó');
+              if (done) onClose();
+            }}
+          >
+            Guardar
+          </button>
+        </>
+      }
+    >
+      <p className="muted">
+        Antes: {formatDateTime(entry.date)} · {money(Math.abs(entry.amountCents))}.{' '}
+        {cents ? `Con el cambio, ${client.name} queda debiendo ${money(client.balanceCents + diff)}.` : ''}
+      </p>
+      <div className="row3">
+        <Field label={isPayment ? 'Cuánto abonó' : 'Cuánto debe'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+        <DayField value={day} onChange={setDay} />
+        <Field label={isPayment ? 'Nota (opcional)' : 'De qué es'}>{id => <input id={id} value={note} onChange={e => setNote(e.target.value)} />}</Field>
+      </div>
     </Modal>
   );
 }

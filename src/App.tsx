@@ -91,6 +91,8 @@ function Shell() {
   const { user, seesMoney, canEdit, settings, lock } = useSession();
   const { toast } = useUi();
   const [screen, setScreen] = useState<Screen>('home');
+  // Clientes se abre en "Deben" cuando se llega desde "Pendiente por cobrar" de Inicio; desde el menú, en "Todos".
+  const [clientsFilter, setClientsFilter] = useState<'all' | 'debt'>('all');
   const lastActivity = useRef(Date.now());
 
   // Equipos vinculados: anotar que se usó, y si la dueña lo quitó, borrarse y salir.
@@ -134,7 +136,15 @@ function Shell() {
           <SyncBadge />
         </div>
         {nav.map(item => (
-          <button key={item.screen} className={screen === item.screen ? 'on' : ''} aria-current={screen === item.screen ? 'page' : undefined} onClick={() => setScreen(item.screen)}>
+          <button
+            key={item.screen}
+            className={screen === item.screen ? 'on' : ''}
+            aria-current={screen === item.screen ? 'page' : undefined}
+            onClick={() => {
+              setClientsFilter('all');
+              setScreen(item.screen);
+            }}
+          >
             <Icon name={item.icon} />
             <span>{item.label}</span>
           </button>
@@ -146,11 +156,19 @@ function Shell() {
       </nav>
       <main className="content">
         <Suspense fallback={<p className="muted center">Cargando…</p>}>
-          {screen === 'home' && <Home go={setScreen} />}
+          {screen === 'home' && (
+            <Home
+              go={setScreen}
+              goDebts={() => {
+                setClientsFilter('debt');
+                setScreen('clients');
+              }}
+            />
+          )}
           {screen === 'lottery' && <Lottery />}
           {screen === 'sell' && canEdit && <Sell />}
           {screen === 'products' && <Products />}
-          {screen === 'clients' && <Clients />}
+          {screen === 'clients' && <Clients key={clientsFilter} initialFilter={clientsFilter} />}
           {screen === 'sales' && <SalesHistory />}
           {screen === 'reports' && seesMoney && <Reports />}
           {screen === 'settings' && <SettingsScreen />}

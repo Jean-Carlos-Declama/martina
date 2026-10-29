@@ -5,7 +5,7 @@ import { addProduct, newWorld } from '../test/helpers';
 import { exportBackup, importBackup } from './backup';
 import { createClient } from './clients';
 import { BusinessError, dayKeyOf, newId } from './common';
-import { registerPayment } from './credit';
+import { addCharge, clientAccount, registerPayment, updateCreditEntry, voidCreditEntry } from './credit';
 import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, updateLotterySale, updatePrize, voidLotterySale, voidPrize } from './lottery';
 import { createProduct, updateProduct } from './products';
 import { salesReport, stockAlerts } from './reports';
@@ -218,6 +218,47 @@ describe('fiado', () => {
     await createClient(w.db, { name: 'José Pérez', phone: '809-555-1234' }, w.owner.id);
     await expect(createClient(w.db, { name: 'jose perez' }, w.owner.id)).rejects.toThrow(/Ya hay un cliente/);
     expect((await w.db.clients.toArray())[0].phone).toBe('8095551234');
+  });
+
+  it('deuda a mano y abono con fecha del mes pasado; corregir y anular; la cuenta va por fecha', async () => {
+    const w = await newWorld();
+    const rosa = await newClient(w.db, 'Rosa');
+    const lastMonth = dayKeyOf(new Date(Date.now() - 35 * 24 * 60 * 60 * 1000));
+    const lastWeek = dayKeyOf(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    await addCharge(w.db, rosa, 50000, w.owner.id, 'Lo que debía en la libreta', lastMonth);
+    const payment = await registerPayment(w.db, rosa, 20000, w.owner.id, undefined, lastWeek);
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(30000);
+    // Se anota hoy un abono, y DESPUÉS uno con fecha anterior: la cuenta los pone en orden de fecha.
+    await registerPayment(w.db, rosa, 5000, w.owner.id);
+    await registerPayment(w.db, rosa, 1000, w.owner.id, 'de ayer', dayKeyOf(new Date(Date.now() - 24 * 60 * 60 * 1000)));
+    let account = await clientAccount(w.db, rosa);
+    expect(account.map(a => a.runningCents)).toEqual([50000, 30000, 29000, 24000]);
+
+    // El abono de la semana pasada era de 250, no de 200.
+    await updateCreditEntry(w.db, payment.id, { amountCents: 25000, dayKey: lastWeek }, w.owner.id);
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(19000);
+    // El de ayer no era de ella: se anula.
+    const wrong = account[2];
+    await voidCreditEntry(w.db, wrong.id, w.owner.id, 'era de otra persona');
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(20000);
+    account = await clientAccount(w.db, rosa);
+    expect(account.map(a => a.runningCents)).toEqual([50000, 25000, 25000, 20000]);
+    // No se puede dejar debiendo menos de cero ni anotar en el futuro.
+    await expect(updateCreditEntry(w.db, payment.id, { amountCents: 90000 }, w.owner.id)).rejects.toThrow(/menos de cero/);
+    await expect(registerPayment(w.db, rosa, 100, w.owner.id, undefined, dayKeyOf(new Date(Date.now() + 48 * 60 * 60 * 1000)))).rejects.toThrow(
+      /no ha llegado/,
+    );
+  });
+
+  it('el fiado que viene de una venta o jugada se corrige desde Ventas o Lotería, no en la cuenta', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const ana = await newClient(w.db, 'Ana');
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
+    await addLotterySale(w.db, { amountCents: 2000, clientId: ana, credit: true, userId: w.owner.id, requestId: newId() });
+    const [fromSale, fromLottery] = await clientAccount(w.db, ana);
+    await expect(updateCreditEntry(w.db, fromSale.id, { amountCents: 1 }, w.owner.id)).rejects.toThrow(/Ventas/);
+    await expect(voidCreditEntry(w.db, fromLottery.id, w.owner.id, 'x')).rejects.toThrow(/Lotería/);
   });
 });
 

@@ -148,14 +148,20 @@ export interface CreditEntry {
   id: Id;
   clientId: Id;
   date: string;
-  /** sale: venta de la tienda fiada · lottery: lotería fiada · payment: abono · saleVoid / adjust: anulación o devolución. */
-  kind: 'sale' | 'lottery' | 'payment' | 'saleVoid' | 'adjust';
+  /**
+   * sale: venta de la tienda fiada · lottery: lotería fiada · payment: abono · charge: deuda anotada a mano (ej. lo que
+   * debía en la libreta) · saleVoid / adjust: anulación, devolución o corrección de una venta o jugada.
+   */
+  kind: 'sale' | 'lottery' | 'payment' | 'charge' | 'saleVoid' | 'adjust';
   /** + aumenta la deuda, - la baja. */
   amountCents: number;
+  /** Lo que quedó debiendo al anotarlo (la pantalla calcula el saldo por fecha, por si se anota algo con fecha anterior). */
   balanceAfterCents: number;
   saleId?: Id;
   userId: Id;
   note?: string;
+  /** Un abono o una deuda a mano que se anuló (ya no cuenta). */
+  status?: 'void';
 }
 
 /** Una jugada de lotería vendida a un cliente (lo que anota en la libreta: el nombre y cuánto compró). */

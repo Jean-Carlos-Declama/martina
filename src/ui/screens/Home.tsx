@@ -14,7 +14,7 @@ import { DeliverStat } from './Lottery';
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
-export function Home({ go }: { go: (screen: Screen) => void }) {
+export function Home({ go, goDebts }: { go: (screen: Screen) => void; goDebts: () => void }) {
   const { user, isOwner, canEdit, seesMoney, money, settings } = useSession();
   const today = dayKeyOf();
   const lottery = useLiveQuery(() => computeDay(db, today), [today]);
@@ -86,13 +86,25 @@ export function Home({ go }: { go: (screen: Screen) => void }) {
           <div className="stats">
             <Stat label="Vendido" value={money(store.salesCents)} sub={plural(store.salesCount, 'venta', 'ventas')} />
             {seesMoney && <Stat label="Ganancia" value={money(store.profitCents)} tone="good" />}
-            {debt && <Stat label="Fiado por cobrar" value={money(debt.cents)} sub={plural(debt.count, 'cliente', 'clientes')} tone={debt.cents > 0 ? 'bad' : 'plain'} />}
           </div>
         )}
         {store && store.top.length > 0 && (
           <p className="muted small-text">Lo más vendido hoy: {store.top.map(t => `${t.name} (${formatQty(t.quantity)})`).join(', ')}</p>
         )}
       </section>
+
+      {/* Lo que deben todos los clientes juntos (fiado de la tienda y de la lotería, menos lo que han abonado). */}
+      {debt && (
+        <button className="card card-button" onClick={goDebts}>
+          <Stat
+            label="Pendiente por cobrar"
+            value={money(debt.cents)}
+            tone={debt.cents > 0 ? 'bad' : 'plain'}
+            big
+            sub={debt.cents > 0 ? `${plural(debt.count, 'cliente debe', 'clientes deben')} · toca para ver quiénes y abonar` : 'nadie debe'}
+          />
+        </button>
+      )}
 
       {alerts && (alerts.out.length > 0 || alerts.low.length > 0) && (
         <section className="card">

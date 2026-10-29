@@ -166,7 +166,7 @@ await page.waitForTimeout(200);
 
 // Cliente con fiado y abono
 await nav('Clientes');
-await page.getByRole('button', { name: /Doña Rosa/ }).click();
+await page.locator('.row-button', { hasText: 'Doña Rosa' }).click();
 await page.getByRole('button', { name: 'Registrar abono' }).click();
 await modal().getByLabel('Cuánto abona').fill('200');
 await shot('m19-abono');

@@ -1284,3 +1284,21 @@ button.chip {
   opacity: 0;
   cursor: pointer;
 }
+
+/* Una tarjeta que se toca entera (ej. "Pendiente por cobrar" en Inicio). */
+.card-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.card-button:active {
+  transform: scale(0.995);
+}
+.row-actions {
+  white-space: nowrap;
+  text-align: right;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}

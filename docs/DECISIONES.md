@@ -96,6 +96,15 @@ Una app para el iPad de Martina con dos partes:
 - **Cierre:** solo la dueña cierra el día. Se guardan los totales y ya no se puede anotar ni anular nada de ese día. Para corregir, ella lo reabre y tiene que dar un motivo (queda en la bitácora). El cierre de la lotería **no** frena las ventas de la tienda.
 - **Fiado:** la lotería fiada va a la misma cuenta del cliente que el fiado de la tienda, y se paga con abonos.
 
+## 6b. Clientes y lo que deben
+
+- **«Pendiente por cobrar»:** es lo que deben todos los clientes juntos (fiado de la tienda y de la lotería, menos los abonos). Se ve en Inicio y arriba en Clientes. Al tocarlo se abre la lista de quién debe, de más a menos, con un botón **Abonar** en cada uno.
+- **Abono:** se ve cuánto debe ahora y cuánto quedará después del abono. No se puede abonar más de lo que debe.
+- **Fechas anteriores:** un abono o una **deuda anotada a mano** (por ejemplo, lo que debía en la libreta antes de la app) se puede anotar con la fecha de un día anterior. Nunca en un día que no ha llegado.
+- **Corregir:** los abonos y las deudas a mano se **corrigen** (monto, fecha, nota) o se **anulan**, de cualquier fecha, con el PIN de la dueña. Lo que debe el cliente se ajusta con la diferencia (`add()`), y nunca queda debiendo menos de cero. Lo que viene de una venta o una jugada se corrige allá (Ventas o Lotería); la cuenta lo indica.
+- **La cuenta:** se muestra en orden de fecha, y «Quedó debiendo» se calcula sumando por fecha: así una corrección o algo anotado con fecha anterior queda en su lugar. Se puede ver **todo**, **este mes** o **el mes pasado**.
+- **Datos del cliente** (nombre, teléfono, nota, límite): se editan con el lápiz de la lista o con «Editar datos» en su ficha.
+
 ## 7. Seguridad
 
 - **PIN:** cada persona tiene uno de 4 a 6 números. Se guarda como huella **PBKDF2-SHA256 con 100 000 vueltas** y una sal propia, nunca el PIN en claro.
