@@ -1,3 +1,4 @@
+import { add } from 'dexie';
 import type { MartinaDb } from '../db/database';
 import type { Client, Id } from '../db/types';
 import { audit } from './audit';
@@ -41,13 +42,19 @@ export async function createClient(database: MartinaDb, raw: ClientInput, userId
   });
 }
 
-/** Edita los datos del cliente (lo que debe NO: eso solo cambia con fiados y abonos). */
+/**
+ * Edita los datos del cliente (lo que debe NO: eso solo cambia con fiados y abonos). Si se corrige el nombre, sus
+ * jugadas, premios y ventas también lo dicen bien (y las jugadas anotadas a mano con el nombre viejo).
+ */
 export async function updateClient(database: MartinaDb, id: Id, raw: ClientInput, userId: Id): Promise<void> {
   const input = clean(raw);
-  await database.transaction('rw', database.clients, database.audit, async () => {
-    if (!(await database.clients.get(id))) throw new BusinessError('El cliente no existe.');
+  const tables = [database.clients, database.audit, database.lottery, database.prizes, database.sales];
+  await database.transaction('rw', tables, async () => {
+    const before = await database.clients.get(id);
+    if (!before) throw new BusinessError('El cliente no existe.');
     await checkName(database, input.name, id);
     await database.clients.update(id, { ...input });
+    if (before.name !== input.name) await renameEverywhere(database, id, before.name, input.name);
     await audit(database, userId, 'editar', 'cliente', id, input.name);
   });
 }
@@ -63,7 +70,46 @@ export async function setClientActive(database: MartinaDb, id: Id, active: boole
 }
 
 /** El nombre para comparar: sin tildes, mayúsculas ni espacios de más. */
-const nameKey = (name: string) => normalize(name).replace(/\s+/g, ' ');
+export const nameKey = (name: string) => normalize(name).replace(/\s+/g, ' ');
+
+/** Pone el nombre nuevo en las jugadas, premios y ventas del cliente, y en las anotadas a mano con su nombre viejo. */
+async function renameEverywhere(database: MartinaDb, id: Id, oldName: string, newName: string): Promise<void> {
+  const old = nameKey(oldName);
+  const mine = (row: { clientId?: Id; clientName?: string }) => row.clientId === id || (!row.clientId && !!row.clientName && nameKey(row.clientName) === old);
+  await database.lottery.filter(mine).modify({ clientId: id, clientName: newName });
+  await database.prizes.filter(mine).modify({ clientId: id, clientName: newName });
+  await database.sales.where('clientId').equals(id).modify({ clientName: newName });
+}
+
+/**
+ * Une dos cuentas de la misma persona (ej. "Pedro Gomes", que quedó registrado mal escrito, con "Pedro Gómez"): todo lo
+ * de la primera (lo que debe, abonos, jugadas, premios y ventas) pasa a la segunda, y la primera se borra.
+ */
+export async function mergeClients(database: MartinaDb, fromId: Id, intoId: Id, userId: Id): Promise<Client> {
+  if (fromId === intoId) throw new BusinessError('Es el mismo cliente.');
+  const tables = [database.clients, database.credit, database.lottery, database.prizes, database.sales, database.audit];
+  return database.transaction('rw', tables, async () => {
+    const from = await database.clients.get(fromId);
+    const into = await database.clients.get(intoId);
+    if (!from || !into) throw new BusinessError('El cliente no existe.');
+    await database.credit.where('clientId').equals(fromId).modify({ clientId: intoId });
+    await database.sales.where('clientId').equals(fromId).modify({ clientId: intoId });
+    await database.lottery.where('clientId').equals(fromId).modify({ clientId: intoId });
+    await database.prizes.where('clientId').equals(fromId).modify({ clientId: intoId });
+    await renameEverywhere(database, intoId, from.name, into.name);
+    const balance = into.balanceCents + from.balanceCents;
+    // Súmale (no "ponle X"): así no se pisa con un fiado que llegue de otro equipo al mismo tiempo.
+    await database.clients.update(intoId, {
+      balanceCents: add(from.balanceCents),
+      phone: into.phone ?? from.phone,
+      notes: into.notes ?? from.notes,
+      ...(balance > 0 && !into.active ? { active: true } : {}),
+    });
+    await database.clients.delete(fromId);
+    await audit(database, userId, 'unir', 'cliente', intoId, `${from.name} → ${into.name}`);
+    return { ...into, balanceCents: balance };
+  });
+}
 
 /** El cliente con ese nombre exacto (sin importar tildes, mayúsculas ni espacios), si existe. */
 export function exactClient(name: string, clients: Client[] | undefined): Client | undefined {

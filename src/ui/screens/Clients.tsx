@@ -1,13 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useId, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { db } from '../../db/database';
 import type { Client, CreditEntry } from '../../db/types';
-import { createClient, setClientActive, updateClient } from '../../domain/clients';
+import { createClient, exactClient, mergeClients, setClientActive, updateClient } from '../../domain/clients';
 import { dayKeyOf } from '../../domain/common';
 import { addCharge, clientAccount, registerPayment, updateCreditEntry, voidCreditEntry, type AccountLine } from '../../domain/credit';
 import { normalize } from '../../domain/products';
 import { useSession, useUi } from '../context';
-import { formatPhone, formatWhen, moneyField, parseMoney, plural, shiftDay } from '../format';
+import { balanceLabel, formatPhone, formatWhen, moneyField, parseMoney, plural, shiftDay } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
 import { debtText, openWhatsApp } from '../share';
@@ -18,6 +18,7 @@ function lineLabel(line: CreditEntry): { label: string; note?: string } {
   if (line.kind !== 'adjust') return { label: CREDIT_LABELS[line.kind], note: line.kind === 'saleVoid' ? note : line.note };
   if (line.note === 'Lotería corregida') return { label: line.amountCents > 0 ? 'Jugada corregida (se le sumó)' : 'Jugada corregida (se le rebajó)' };
   if (line.note === 'Lotería anulada') return { label: 'Jugada anulada' };
+  if (line.note === 'Lotería pasada a otro cliente') return { label: 'Jugada pasada a otro cliente (el nombre estaba mal)' };
   if (line.note?.startsWith('Devolución ')) return { label: 'Devolución', note };
   return { label: CREDIT_LABELS.adjust, note: line.note };
 }
@@ -169,15 +170,31 @@ export default function Clients({ initialFilter = 'all' }: { initialFilter?: 'al
   );
 }
 
-function ClientForm({ client, onClose }: { client?: Client; onClose: () => void }) {
-  const { user, settings } = useSession();
-  const { run } = useUi();
+/** Cliente nuevo o editar sus datos. `onClose(id)` trae el cliente con el que se unió, si se unieron dos cuentas. */
+function ClientForm({ client, onClose }: { client?: Client; onClose: (mergedInto?: string) => void }) {
+  const { user, settings, money, requireOwner } = useSession();
+  const { run, confirm, toast } = useUi();
   const [name, setName] = useState(client?.name ?? '');
   const [phone, setPhone] = useState(formatPhone(client?.phone));
   const [notes, setNotes] = useState(client?.notes ?? '');
   const [limit, setLimit] = useState(moneyField(client?.creditLimitCents));
 
   const save = async () => {
+    // ¿El nombre corregido es el de otro cliente? Entonces es la misma persona con dos cuentas: se ofrece unirlas.
+    const other = client && exactClient(name, (await db.clients.toArray()).filter(c => c.id !== client.id));
+    if (client && other) {
+      const same = await confirm({
+        title: `Ya existe «${other.name}»`,
+        message: `¿Es la misma persona? Si unes las cuentas, todo lo de «${client.name}» (${balanceLabel(client.balanceCents, money)}) pasa a «${other.name}» (${balanceLabel(other.balanceCents, money)}): lo que debe, sus abonos, sus jugadas y sus ventas. «${client.name}» deja de existir.`,
+        okText: 'Sí, unir las cuentas',
+        cancelText: 'No, es otra persona',
+      });
+      if (!same) return toast('Ponle un nombre distinto (por ejemplo, con el apellido).', 'error');
+      const owner = await requireOwner('Unir cuentas: autorización de la dueña');
+      if (!owner) return;
+      if (await run(() => mergeClients(db, client.id, other.id, owner.id), `Listo: todo quedó en la cuenta de ${other.name}`)) onClose(other.id);
+      return;
+    }
     const input = { name, phone, notes, creditLimitCents: parseMoney(limit) ?? undefined };
     const ok = await run(async () => {
       if (client) await updateClient(db, client.id, input, user.id);
@@ -193,7 +210,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={() => onClose()}>
             Cancelar
           </button>
           <button className="btn primary" disabled={!name.trim()} onClick={() => void save()}>
@@ -219,7 +236,12 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
 /** La ficha de un cliente encima de otra pantalla (ej. al tocar su nombre en la Lotería): su cuenta, abonar y editar sus datos. */
 export function ClientSheet({ id, onClose }: { id: string; onClose: () => void }) {
   const [editing, setEditing] = useState<Client | null>(null);
-  return editing ? <ClientForm client={editing} onClose={() => setEditing(null)} /> : <ClientDetail id={id} onClose={onClose} onEdit={setEditing} />;
+  // Si al editar se unió con otra cuenta, esta ya no existe: se cierra todo.
+  return editing ? (
+    <ClientForm client={editing} onClose={merged => (merged ? onClose() : setEditing(null))} />
+  ) : (
+    <ClientDetail id={id} onClose={onClose} onEdit={setEditing} />
+  );
 }
 
 type Period = 'all' | 'month' | 'last';
@@ -267,7 +289,12 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
   }, [account, period]);
   // Ventas y jugadas fiadas que ya se anularon (la cuenta tiene la línea que las quita): ya no hay nada que corregir.
   const voidedOrigins = useMemo(
-    () => new Set((account ?? []).filter(l => l.kind === 'saleVoid' || (l.kind === 'adjust' && l.note === 'Lotería anulada')).map(l => l.saleId)),
+    () =>
+      new Map(
+        (account ?? [])
+          .filter(l => l.kind === 'saleVoid' || (l.kind === 'adjust' && (l.note === 'Lotería anulada' || l.note === 'Lotería pasada a otro cliente')))
+          .map(l => [l.saleId, l.note === 'Lotería pasada a otro cliente' ? 'pasada a otro cliente' : 'anulada'] as const),
+      ),
     [account],
   );
   if (!client) return null;
@@ -394,7 +421,7 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
                       {(h.kind === 'sale' || h.kind === 'lottery') &&
                         h.status !== 'void' &&
                         (voidedOrigins.has(h.saleId) ? (
-                          <small className="muted"> · anulada</small>
+                          <small className="muted"> · {voidedOrigins.get(h.saleId)}</small>
                         ) : (
                           canEdit && <small className="muted"> · se corrige en {h.kind === 'lottery' ? 'Lotería' : 'Ventas'}</small>
                         ))}
@@ -463,7 +490,6 @@ const COMMON_NOTES: Record<'payment' | 'charge', string[]> = {
  * nuevas primero, para no escribir lo mismo cada vez.
  */
 function NoteField(props: { label: string; kind: 'payment' | 'charge'; value: string; onChange: (value: string) => void; placeholder?: string }) {
-  const listId = useId();
   const notes = useLiveQuery(async () => {
     const rows = await db.credit
       .orderBy('date')
@@ -473,16 +499,23 @@ function NoteField(props: { label: string; kind: 'payment' | 'charge'; value: st
       .toArray();
     return [...new Set([...rows.map(r => r.note!.trim()), ...COMMON_NOTES[props.kind]])].slice(0, 60);
   }, [props.kind]);
+  // Hechas a mano (la lista del navegador casi no sale en el iPad): las que contienen lo escrito, o las últimas si está vacío.
+  const typed = normalize(props.value);
+  const shown = (notes ?? []).filter(n => normalize(n) !== typed && (!typed || normalize(n).includes(typed))).slice(0, 5);
   return (
-    <Field label={props.label} hint="Al escribir te sugiere lo que ya usaste antes">
+    <Field label={props.label} hint="Toca una sugerencia para no escribirla otra vez">
       {id => (
         <>
-          <input id={id} list={listId} autoComplete="off" value={props.value} onChange={e => props.onChange(e.target.value)} placeholder={props.placeholder} />
-          <datalist id={listId}>
-            {notes?.map(n => (
-              <option key={n} value={n} />
-            ))}
-          </datalist>
+          <input id={id} autoComplete="off" value={props.value} onChange={e => props.onChange(e.target.value)} placeholder={props.placeholder} />
+          {shown.length > 0 && (
+            <div className="client-suggest" aria-label="Sugerencias">
+              {shown.map(n => (
+                <button type="button" key={n} className="chip" onClick={() => props.onChange(n)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
     </Field>

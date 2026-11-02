@@ -98,6 +98,8 @@ export async function addLotterySale(database: MartinaDb, input: LotteryInput): 
 export interface EntryChanges {
   clientId?: Id;
   clientName?: string;
+  /** Jugada fiada pasada a alguien que no está registrado: se registra junto con la corrección. */
+  newClientName?: string;
   amountCents: number;
   lottery?: string;
 }
@@ -110,13 +112,18 @@ export async function updateLotterySale(database: MartinaDb, entryId: Id, change
     const entry = await database.lottery.get(entryId);
     if (!entry || entry.status === 'void') throw new BusinessError('Esa jugada no existe o ya está anulada.');
     await ensureDayOpen(database, entry.dayKey);
-    if (entry.credit && changes.clientId !== entry.clientId)
-      throw new BusinessError(`Esa jugada se le fió a ${entry.clientName}: para cambiar el cliente, anúlala y anótala otra vez.`);
-    const clientName = await nameFor(database, changes.clientId, changes.clientName);
+    let clientId = changes.clientId;
+    if (entry.credit && !clientId && changes.newClientName?.trim()) clientId = (await createClient(database, { name: changes.newClientName }, userId)).id;
+    if (entry.credit && !clientId) throw new BusinessError('Una jugada fiada tiene que ser de un cliente registrado.');
+    const clientName = await nameFor(database, clientId, changes.clientName);
     const amount = Math.round(changes.amountCents);
-    await database.lottery.update(entryId, { clientId: changes.clientId, clientName, amountCents: amount, lottery: changes.lottery?.trim() || undefined });
-    // Si era fiada, a la cuenta del cliente se le suma o resta la diferencia.
-    if (entry.credit && entry.clientId && amount !== entry.amountCents)
+    await database.lottery.update(entryId, { clientId, clientName, amountCents: amount, lottery: changes.lottery?.trim() || undefined });
+    if (entry.credit && clientId !== entry.clientId) {
+      // El nombre estaba mal: la deuda sale de la cuenta del primero y pasa (con el monto corregido) a la del correcto.
+      if (entry.clientId) await addCredit(database, entry.clientId, -entry.amountCents, 'adjust', userId, entry.id, 'Lotería pasada a otro cliente');
+      await addCredit(database, clientId!, amount, 'lottery', userId, entry.id, `Pasada de ${entry.clientName}`, entry.date);
+    } else if (entry.credit && entry.clientId && amount !== entry.amountCents)
+      // Si era fiada, a la cuenta del cliente se le suma o resta la diferencia.
       await addCredit(database, entry.clientId, amount - entry.amountCents, 'adjust', userId, entry.id, 'Lotería corregida');
     await audit(database, userId, 'corregir', 'lotería', entryId, `${entry.clientName} ${entry.amountCents / 100} → ${clientName} ${amount / 100}`);
   });

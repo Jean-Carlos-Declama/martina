@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { db } from '../db/database';
 import type { Client } from '../db/types';
-import { exactClient, similarClients } from '../domain/clients';
+import { exactClient, nameKey, similarClients } from '../domain/clients';
 import { passesCreditLimit } from '../domain/credit';
 import { useSession } from './context';
 import { balanceLabel } from './format';
@@ -16,24 +16,29 @@ export const balanceTone = (cents: number) => (cents > 0 ? 'bad-text' : cents < 
 
 /** ¿Salen clientes parecidos debajo del campo? (así la pista no dice "nombre nuevo" cuando a lo mejor no lo es). */
 export function showsSuggestions(name: string, clients: Client[] | undefined): boolean {
-  return name.trim().length >= 2 && !!clients && similarClients(name, clients, 1).length > 0;
+  return !!name.trim() && !!clients && !exactClient(name, clients) && similarClients(name, clients, 1).length > 0;
 }
 
 /**
- * Debajo del campo Cliente: los clientes que se parecen a lo escrito, con lo que debe cada uno. Tocar uno pone su
- * nombre. Si lo escrito ya es un cliente pero hay otro casi igual, avisa ("Ojo, también está…") por si es una cuenta repetida.
+ * Debajo del campo Cliente, mientras se escribe: los clientes que empiezan o se parecen a lo escrito (aunque tenga una
+ * letra mal), con lo que debe cada uno, y en la lotería también los nombres que ya se usaron. Tocar uno pone su nombre.
+ * Va hecho a mano porque la lista del navegador (datalist) casi no sale en el iPad.
  */
-export function ClientSuggestions({ name, clients, onPick }: { name: string; clients: Client[] | undefined; onPick: (client: Client) => void }) {
+export function ClientSuggestions({ name, clients, names = [], onPick }: { name: string; clients: Client[] | undefined; names?: string[]; onPick: (name: string) => void }) {
   const { money } = useSession();
-  if (!clients || !showsSuggestions(name, clients)) return null;
-  const matches = similarClients(name, clients, 4);
+  if (!clients || !name.trim() || exactClient(name, clients)) return null;
+  const registered = new Set(clients.map(c => nameKey(c.name)));
+  const others = [...new Set(names)]
+    .filter(n => n.trim() && !registered.has(nameKey(n)))
+    .map(n => ({ id: `nombre:${n}`, name: n, balanceCents: 0, active: true, createdAt: '' }) as Client);
+  const matches = similarClients(name, [...clients, ...others], 5);
+  if (matches.length === 0) return null;
   return (
     <div className="client-suggest" aria-label="Sugerencias">
-      {exactClient(name, clients) && <small className="warn-text">Ojo, también está:</small>}
       {matches.map(c => (
-        <button type="button" key={c.id} className="chip" onClick={() => onPick(c)}>
+        <button type="button" key={c.id} className="chip" onClick={() => onPick(c.name)}>
           {c.name}
-          <small className={balanceTone(c.balanceCents)}>{balanceLabel(c.balanceCents, money)}</small>
+          {!c.id.startsWith('nombre:') && <small className={balanceTone(c.balanceCents)}>{balanceLabel(c.balanceCents, money)}</small>}
         </button>
       ))}
     </div>

@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import { db } from '../../db/database';
 import type { Client, LotteryEntry, Prize } from '../../db/types';
-import { exactClient } from '../../domain/clients';
+import { exactClient, nameKey } from '../../domain/clients';
 import { dayKeyOf, newId } from '../../domain/common';
 import {
   addLotterySale,
@@ -396,19 +396,16 @@ function EntryOwes({ balance }: { balance: number }) {
   return balance === 0 ? null : <small className={`owes ${balanceTone(balance)}`}>{balanceLabel(balance, money)}</small>;
 }
 
-function NameField({ value, onChange, hint, listId, extra }: { value: string; onChange: (value: string) => void; hint?: ReactNode; listId: string; extra?: ReactNode }) {
+/** El campo del nombre: mientras se escribe salen los clientes (con lo que deben) y los nombres que ya se usaron. */
+function NameField({ value, onChange, hint }: { value: string; onChange: (value: string) => void; hint?: ReactNode }) {
   const { suggestions } = useNameSuggestions();
+  const clients = useLiveQuery(() => db.clients.toArray(), []);
   return (
     <Field label="Cliente" hint={hint}>
       {id => (
         <>
-          <input id={id} list={listId} autoComplete="off" autoCapitalize="words" value={value} onChange={e => onChange(e.target.value)} placeholder="Nombre" />
-          <datalist id={listId}>
-            {suggestions.map(s => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
-          {extra}
+          <input id={id} autoComplete="off" autoCapitalize="words" value={value} onChange={e => onChange(e.target.value)} placeholder="Nombre" />
+          <ClientSuggestions name={value} clients={clients} names={suggestions} onPick={onChange} />
         </>
       )}
     </Field>
@@ -504,13 +501,7 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
         }}
       >
         <div className={settings.lotteries.length > 0 ? 'row3' : 'row2'}>
-          <NameField
-            value={name}
-            onChange={setName}
-            listId="lottery-names"
-            hint={hint}
-            extra={<ClientSuggestions name={name} clients={clients} onPick={c => setName(c.name)} />}
-          />
+          <NameField value={name} onChange={setName} hint={hint} />
           <Field label={kind === 'play' ? 'Cuánto jugó' : 'Cuánto se sacó'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} currency={settings.currency} />}</Field>
           {settings.lotteries.length > 0 && (
             <Field label="Lotería">
@@ -551,21 +542,35 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
   const { settings, money } = useSession();
   const { run } = useUi();
   const { findClient } = useNameSuggestions();
+  const { resolveClient, prompt } = useCreditClient();
   const [name, setName] = useState(entry.clientName);
   const [amount, setAmount] = useState(moneyField(entry.amountCents));
   const [lottery, setLottery] = useState(entry.lottery ?? '');
   const isPlay = entry.kind === 'play';
-  const lockedClient = isPlay && entry.credit;
+  const fiada = isPlay && entry.credit;
+  // Jugada fiada con el nombre corregido: la deuda pasa de la cuenta del primero a la del nombre correcto.
+  const changedClient = fiada && !!name.trim() && nameKey(name) !== nameKey(entry.clientName);
   // Jugada fiada: corregir el monto también cambia lo que debe el cliente.
-  const creditClient = useLiveQuery(() => (lockedClient && entry.clientId ? db.clients.get(entry.clientId) : undefined), [lockedClient, entry.clientId]);
+  const creditClient = useLiveQuery(() => (fiada && entry.clientId ? db.clients.get(entry.clientId) : undefined), [fiada, entry.clientId]);
   const cents = parseMoney(amount);
   // Cómo queda la cuenta del cliente con el monto corregido (puede quedarle saldo a favor).
-  const after = creditClient && cents ? creditClient.balanceCents + cents - entry.amountCents : null;
+  const after = creditClient && cents && !changedClient ? creditClient.balanceCents + cents - entry.amountCents : null;
 
   const save = async () => {
     if (!cents) return;
-    const client = lockedClient ? undefined : findClient(name);
-    const changes = { clientId: lockedClient ? entry.clientId : client?.id, clientName: lockedClient ? entry.clientName : name, amountCents: cents, lottery: lottery || undefined };
+    let clientId = fiada ? entry.clientId : findClient(name)?.id;
+    let newClientName: string | undefined;
+    if (changedClient) {
+      // ¿A quién pasa? Si no es exactamente un cliente, pregunta (¿es uno de estos parecidos?, ¿cliente nuevo?).
+      const target = await resolveClient(name, cents);
+      if (!target) return;
+      if ('client' in target) clientId = target.client.id;
+      else {
+        clientId = undefined;
+        newClientName = target.newClientName;
+      }
+    }
+    const changes = { clientId, newClientName, clientName: name, amountCents: cents, lottery: lottery || undefined };
     const ok = await run(async () => {
       if (isPlay) await updateLotterySale(db, entry.id, changes, ownerId);
       else await updatePrize(db, entry.id, changes, ownerId);
@@ -592,7 +597,12 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
       <p className="muted">
         Antes: {entry.clientName} · {money(entry.amountCents)}. Al guardar, el cuadre del día se recalcula solo.
       </p>
-      {creditClient && (
+      {changedClient && (
+        <p className="warn-text">
+          Esta jugada fiada ({money(cents ?? entry.amountCents)}) sale de la cuenta de {entry.clientName} y pasa a la de {name.trim()}.
+        </p>
+      )}
+      {creditClient && !changedClient && (
         <div className="stats">
           <Stat
             label={creditClient.balanceCents < 0 ? `${creditClient.name} tiene a favor` : `${creditClient.name} debe ahora`}
@@ -613,13 +623,7 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
         </p>
       ) : null}
       <div className="row2">
-        {lockedClient ? (
-          <Field label="Cliente" hint="Jugada fiada: para cambiar el cliente, anúlala y anótala otra vez">
-            {id => <input id={id} value={entry.clientName} disabled />}
-          </Field>
-        ) : (
-          <NameField value={name} onChange={setName} listId="edit-names" />
-        )}
+        <NameField value={name} onChange={setName} hint={fiada ? 'Si el nombre está mal, corrígelo: la deuda pasa a la cuenta correcta.' : undefined} />
         <Field label={isPlay ? 'Cuánto jugó' : 'Cuánto se sacó'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} currency={settings.currency} autoFocus />}</Field>
       </div>
       {settings.lotteries.length > 0 && (
@@ -634,6 +638,7 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
           )}
         </Field>
       )}
+      {prompt}
     </Modal>
   );
 }

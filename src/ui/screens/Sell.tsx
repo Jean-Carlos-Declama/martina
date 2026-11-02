@@ -9,7 +9,7 @@ import { matchesSearch } from '../../domain/products';
 import { createSale, receiptNumber } from '../../domain/sales';
 import { ClientSuggestions, CreditPreview, showsSuggestions, useCreditClient, type CreditTarget } from '../clientPick';
 import { useSession, useUi } from '../context';
-import { balanceLabel, formatQty, moneyField, parseMoney, parseQty, PAYMENT_LABELS, qtyWithUnit } from '../format';
+import { formatQty, moneyField, parseMoney, parseQty, PAYMENT_LABELS, qtyWithUnit } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, PhotoThumb, Segmented } from '../kit';
 import { openWhatsApp, receiptText, shareText } from '../share';
@@ -406,15 +406,8 @@ function Checkout({ subtotal, onClose, onPay }: { subtotal: number; onClose: () 
         >
           {id => (
             <>
-              <input id={id} list="sale-clients" autoComplete="off" autoCapitalize="words" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
-              <datalist id="sale-clients">
-                {clients
-                  ?.filter(c => c.active || c.balanceCents > 0)
-                  .map(c => (
-                    <option key={c.id} value={c.name} label={balanceLabel(c.balanceCents, money)} />
-                  ))}
-              </datalist>
-              <ClientSuggestions name={name} clients={clients} onPick={c => setName(c.name)} />
+              <input id={id} autoComplete="off" autoCapitalize="words" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
+              <ClientSuggestions name={name} clients={clients?.filter(c => c.active || c.balanceCents > 0)} onPick={setName} />
             </>
           )}
         </Field>

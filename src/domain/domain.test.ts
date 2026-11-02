@@ -4,7 +4,7 @@ import { getDeviceLocal, getSettings, MartinaDb, saveSettings } from '../db/data
 import type { Client } from '../db/types';
 import { addProduct, newWorld } from '../test/helpers';
 import { exportBackup, importBackup } from './backup';
-import { createClient, exactClient, setClientActive, similarClients } from './clients';
+import { createClient, exactClient, mergeClients, setClientActive, similarClients, updateClient } from './clients';
 import { BusinessError, dayKeyOf, newId } from './common';
 import { addCharge, clientAccount, passesCreditLimit, registerPayment, updateCreditEntry, voidCreditEntry } from './credit';
 import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, updateLotterySale, updatePrize, voidLotterySale, voidPrize } from './lottery';
@@ -240,6 +240,47 @@ describe('fiado', () => {
     await voidSale(w.db, s3.id, w.owner.id, 'error');
     expect((await w.db.products.get(p.id))!.stock).toBe(10);
     expect((await salesReport(w.db, today(), today())).salesCents).toBe(0);
+  });
+
+  it('corregir el nombre de una jugada fiada pasa la deuda a la cuenta correcta (o a un cliente nuevo)', async () => {
+    const w = await newWorld();
+    const gomez = await newClient(w.db, 'Pedro Gómez');
+    const gomes = await newClient(w.db, 'Pedro Gomes');
+    const play = await addLotterySale(w.db, { amountCents: 5000, clientId: gomes, credit: true, userId: w.owner.id, requestId: newId() });
+    await updateLotterySale(w.db, play.id, { clientId: gomez, clientName: 'Pedro Gómez', amountCents: 6000 }, w.owner.id);
+    expect((await w.db.clients.get(gomes))!.balanceCents).toBe(0);
+    expect((await w.db.clients.get(gomez))!.balanceCents).toBe(6000);
+    expect((await w.db.lottery.get(play.id))!.clientName).toBe('Pedro Gómez');
+    // A un nombre que no está registrado: se registra junto con la corrección.
+    await updateLotterySale(w.db, play.id, { newClientName: 'Ana Pérez', clientName: 'Ana Pérez', amountCents: 6000 }, w.owner.id);
+    const ana = (await w.db.clients.toArray()).find(c => c.name === 'Ana Pérez')!;
+    expect(ana.balanceCents).toBe(6000);
+    expect((await w.db.clients.get(gomez))!.balanceCents).toBe(0);
+    // Y si después se anula, se le quita a quien la tiene ahora.
+    await voidLotterySale(w.db, play.id, w.owner.id, 'error');
+    expect((await w.db.clients.get(ana.id))!.balanceCents).toBe(0);
+  });
+
+  it('dos cuentas de la misma persona se unen; corregir el nombre lo corrige también en sus jugadas y ventas', async () => {
+    const w = await newWorld();
+    const p = await addProduct(w, {}, 10);
+    const gomez = await newClient(w.db, 'Pedro Gómez');
+    const gomes = await newClient(w.db, 'Pedro Gomes');
+    await addCharge(w.db, gomez, 20000, w.owner.id, 'libreta');
+    await addLotterySale(w.db, { amountCents: 5000, clientId: gomes, credit: true, userId: w.owner.id, requestId: newId() });
+    await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'credit', clientId: gomes, requestId: newId(), userId: w.owner.id });
+    await registerPayment(w.db, gomes, 1000, w.owner.id);
+    await mergeClients(w.db, gomes, gomez, w.owner.id);
+    expect(await w.db.clients.get(gomes)).toBeUndefined();
+    expect((await w.db.clients.get(gomez))!.balanceCents).toBe(29000);
+    expect((await clientAccount(w.db, gomez)).at(-1)!.runningCents).toBe(29000);
+    expect((await w.db.lottery.toArray()).map(e => [e.clientId, e.clientName])).toEqual([[gomez, 'Pedro Gómez']]);
+    expect((await w.db.sales.toArray())[0]).toMatchObject({ clientId: gomez, clientName: 'Pedro Gómez' });
+    // Corregir el nombre del cliente lo corrige en sus jugadas (también en las anotadas a mano con el nombre viejo).
+    await addLotterySale(w.db, { amountCents: 100, clientName: 'pedro gómez', userId: w.owner.id, requestId: newId() });
+    await updateClient(w.db, gomez, { name: 'Pedro Gómez Peña' }, w.owner.id);
+    expect(new Set((await w.db.lottery.toArray()).map(e => e.clientName))).toEqual(new Set(['Pedro Gómez Peña']));
+    expect((await w.db.sales.toArray())[0].clientName).toBe('Pedro Gómez Peña');
   });
 
   it('no deja dos clientes con el mismo nombre (aunque cambien mayúsculas o acentos)', async () => {
@@ -494,7 +535,8 @@ describe('lotería (el cuadre del día)', () => {
     expect(day.totals).toMatchObject({ salesCents: 6500, prizesCount: 3, prizesCents: 6000 });
     expect(day.totals.deliverCents).toBe(6500 - 650 - 6000);
     expect((await w.db.clients.get(ana))!.balanceCents).toBe(3500);
-    await expect(updateLotterySale(w.db, fiada.id, { clientName: 'Otra', amountCents: 3500 }, w.owner.id)).rejects.toThrow(/anúlala/);
+    // Una jugada fiada se puede pasar a otro cliente, pero tiene que quedar a nombre de un cliente registrado.
+    await expect(updateLotterySale(w.db, fiada.id, { clientName: 'Otra', amountCents: 3500 }, w.owner.id)).rejects.toThrow(/cliente registrado/);
   });
 
   it('se puede volver a un día anterior abierto a anotar lo que faltó (no a uno cerrado ni a uno futuro)', async () => {
