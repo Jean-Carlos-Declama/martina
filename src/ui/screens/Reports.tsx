@@ -5,17 +5,18 @@ import { dayKeyOf } from '../../domain/common';
 import { lotteryReport } from '../../domain/lottery';
 import { inventorySummary, periodOf, salesReport } from '../../domain/reports';
 import { useSession } from '../context';
-import { dayLabel, formatQty, plural, shiftDay } from '../format';
+import { dayLabel, formatQty, plural, rangeLabel, shiftDay } from '../format';
 import { Empty, Segmented, Stat } from '../kit';
-import { DeliverStat } from './Lottery';
+import { DeliverStat, LotteryBreakdown } from './Lottery';
 
-type Period = 'today' | 'week' | 'month' | 'custom';
+type Period = 'today' | 'week' | 'lastWeek' | 'month' | 'day' | 'custom';
 
 export default function Reports({ goDebts }: { goDebts: () => void }) {
   const { money } = useSession();
   const [period, setPeriod] = useState<Period>('week');
   const [custom, setCustom] = useState({ from: shiftDay(dayKeyOf(), -30), to: dayKeyOf() });
-  const range = period === 'custom' ? custom : periodOf(period);
+  const [oneDay, setOneDay] = useState(dayKeyOf());
+  const range = period === 'custom' ? custom : period === 'day' ? { from: oneDay, to: oneDay } : periodOf(period);
   const store = useLiveQuery(() => salesReport(db, range.from, range.to, 15), [range.from, range.to]);
   const lottery = useLiveQuery(() => lotteryReport(db, range.from, range.to), [range.from, range.to]);
   const inventory = useLiveQuery(() => inventorySummary(db), []);
@@ -33,11 +34,24 @@ export default function Reports({ goDebts }: { goDebts: () => void }) {
           options={[
             { value: 'today', label: 'Hoy' },
             { value: 'week', label: 'Esta semana' },
+            { value: 'lastWeek', label: 'Semana pasada' },
             { value: 'month', label: 'Este mes' },
+            { value: 'day', label: 'Un día' },
             { value: 'custom', label: 'Otras fechas' },
           ]}
         />
       </header>
+      <p className="muted">
+        {range.from === range.to ? dayLabel(range.from) : `D${rangeLabel(range.from, range.to).slice(1)}`}
+        {period === 'week' || period === 'lastWeek' ? ' · la semana de cierre va de lunes a domingo' : ''}
+      </p>
+      {period === 'day' && (
+        <div className="toolbar">
+          <label className="field inline">
+            Día <input type="date" value={oneDay} max={dayKeyOf()} onChange={e => e.target.value && setOneDay(e.target.value)} />
+          </label>
+        </div>
+      )}
       {period === 'custom' && (
         <div className="toolbar">
           <label className="field inline">
@@ -94,6 +108,12 @@ export default function Reports({ goDebts }: { goDebts: () => void }) {
                 </tbody>
               </table>
             </div>
+            {lottery.byLottery.length > 1 && (
+              <>
+                <h3>Por lotería</h3>
+                <LotteryBreakdown rows={lottery.byLottery} />
+              </>
+            )}
           </>
         ) : (
           <Empty icon="ticket" text="No hay lotería anotada en estas fechas." />

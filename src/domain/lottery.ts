@@ -100,6 +100,8 @@ export interface EntryChanges {
   clientName?: string;
   /** Jugada fiada pasada a alguien que no está registrado: se registra junto con la corrección. */
   newClientName?: string;
+  /** Comentario: por qué se corrige (se queda en la jugada o el premio). */
+  note?: string;
   amountCents: number;
   lottery?: string;
 }
@@ -117,7 +119,13 @@ export async function updateLotterySale(database: MartinaDb, entryId: Id, change
     if (entry.credit && !clientId) throw new BusinessError('Una jugada fiada tiene que ser de un cliente registrado.');
     const clientName = await nameFor(database, clientId, changes.clientName);
     const amount = Math.round(changes.amountCents);
-    await database.lottery.update(entryId, { clientId, clientName, amountCents: amount, lottery: changes.lottery?.trim() || undefined });
+    await database.lottery.update(entryId, {
+      clientId,
+      clientName,
+      amountCents: amount,
+      lottery: changes.lottery?.trim() || undefined,
+      ...(changes.note?.trim() ? { note: changes.note.trim() } : {}),
+    });
     if (entry.credit && clientId !== entry.clientId) {
       // El nombre estaba mal: la deuda sale de la cuenta del primero y pasa (con el monto corregido) a la del correcto.
       if (entry.clientId) await addCredit(database, entry.clientId, -entry.amountCents, 'adjust', userId, entry.id, 'Lotería pasada a otro cliente');
@@ -125,7 +133,7 @@ export async function updateLotterySale(database: MartinaDb, entryId: Id, change
     } else if (entry.credit && entry.clientId && amount !== entry.amountCents)
       // Si era fiada, a la cuenta del cliente se le suma o resta la diferencia.
       await addCredit(database, entry.clientId, amount - entry.amountCents, 'adjust', userId, entry.id, 'Lotería corregida');
-    await audit(database, userId, 'corregir', 'lotería', entryId, `${entry.clientName} ${entry.amountCents / 100} → ${clientName} ${amount / 100}`);
+    await audit(database, userId, 'corregir', 'lotería', entryId, `${entry.clientName} ${entry.amountCents / 100} → ${clientName} ${amount / 100}${changes.note?.trim() ? `. ${changes.note.trim()}` : ''}`);
   });
 }
 
@@ -138,7 +146,7 @@ export async function voidLotterySale(database: MartinaDb, entryId: Id, userId: 
     if (!entry) throw new BusinessError('Esa jugada no existe.');
     if (entry.status === 'void') return;
     await ensureDayOpen(database, entry.dayKey);
-    await database.lottery.update(entryId, { status: 'void' });
+    await database.lottery.update(entryId, { status: 'void', voidReason: reason.trim() });
     if (entry.credit && entry.clientId) await addCredit(database, entry.clientId, -entry.amountCents, 'adjust', userId, entry.id, 'Lotería anulada');
     await audit(database, userId, 'anular', 'lotería', entryId, `${entry.clientName}: ${entry.amountCents / 100}. ${reason.trim()}`);
   });
@@ -192,8 +200,14 @@ export async function updatePrize(database: MartinaDb, prizeId: Id, changes: Ent
     await ensureDayOpen(database, prize.dayKey);
     const clientName = await nameFor(database, changes.clientId, changes.clientName);
     const amount = Math.round(changes.amountCents);
-    await database.prizes.update(prizeId, { clientId: changes.clientId, clientName, amountCents: amount, lottery: changes.lottery?.trim() || undefined });
-    await audit(database, userId, 'corregir', 'premio', prizeId, `${prize.clientName} ${prize.amountCents / 100} → ${clientName} ${amount / 100}`);
+    await database.prizes.update(prizeId, {
+      clientId: changes.clientId,
+      clientName,
+      amountCents: amount,
+      lottery: changes.lottery?.trim() || undefined,
+      ...(changes.note?.trim() ? { note: changes.note.trim() } : {}),
+    });
+    await audit(database, userId, 'corregir', 'premio', prizeId, `${prize.clientName} ${prize.amountCents / 100} → ${clientName} ${amount / 100}${changes.note?.trim() ? `. ${changes.note.trim()}` : ''}`);
   });
 }
 
@@ -205,7 +219,7 @@ export async function voidPrize(database: MartinaDb, prizeId: Id, userId: Id, re
     if (!prize) throw new BusinessError('El premio no existe.');
     if (prize.status === 'void') return;
     await ensureDayOpen(database, prize.dayKey);
-    await database.prizes.update(prizeId, { status: 'void' });
+    await database.prizes.update(prizeId, { status: 'void', voidReason: reason.trim() });
     await audit(database, userId, 'anular', 'premio', prizeId, `${prize.clientName}: ${prize.amountCents / 100}. ${reason.trim()}`);
   });
 }
@@ -352,6 +366,10 @@ export interface LotteryPeriod {
   to: string;
   totals: Omit<DayTotals, 'commissionPct'>;
   days: { dayKey: string; status: Day['status']; totals: DayTotals }[];
+  /** Cada lotería (banca) en el período, con su comisión (al % de cada día). */
+  byLottery: { name: string; salesCents: number; commissionCents: number; prizesCents: number }[];
+  /** Lo que se fió en el período (no entró en efectivo). */
+  creditCents: number;
 }
 
 /** La lotería de varios días (semana, mes): cada día con su propio % de comisión, y la suma. */
@@ -360,9 +378,19 @@ export async function lotteryReport(database: MartinaDb, from: string, to: strin
   for (const e of await database.lottery.where('dayKey').between(from, to, true, true).toArray()) keys.add(e.dayKey);
   for (const p of await database.prizes.where('dayKey').between(from, to, true, true).toArray()) keys.add(p.dayKey);
   const days: LotteryPeriod['days'] = [];
+  const lotteries = new Map<string, { name: string; salesCents: number; commissionCents: number; prizesCents: number }>();
+  let creditCents = 0;
   for (const dayKey of [...keys].sort()) {
     const report = await computeDay(database, dayKey);
     days.push({ dayKey, status: report.status, totals: report.totals });
+    creditCents += report.creditCents;
+    for (const l of report.byLottery) {
+      const row = lotteries.get(l.name) ?? { name: l.name, salesCents: 0, commissionCents: 0, prizesCents: 0 };
+      row.salesCents += l.salesCents;
+      row.commissionCents += percentOf(l.salesCents, report.totals.commissionPct);
+      row.prizesCents += l.prizesCents;
+      lotteries.set(l.name, row);
+    }
   }
   const sum = (field: keyof Omit<DayTotals, 'commissionPct'>) => days.reduce((total, d) => total + d.totals[field], 0);
   return {
@@ -377,5 +405,7 @@ export async function lotteryReport(database: MartinaDb, from: string, to: strin
       prizesCents: sum('prizesCents'),
       deliverCents: sum('deliverCents'),
     },
+    byLottery: [...lotteries.values()].sort((a, b) => b.salesCents - a.salesCents),
+    creditCents,
   };
 }

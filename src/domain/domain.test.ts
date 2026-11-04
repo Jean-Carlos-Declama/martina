@@ -5,11 +5,11 @@ import type { Client } from '../db/types';
 import { addProduct, newWorld } from '../test/helpers';
 import { exportBackup, importBackup } from './backup';
 import { createClient, exactClient, mergeClients, setClientActive, similarClients, updateClient } from './clients';
-import { BusinessError, dayKeyOf, newId } from './common';
+import { BusinessError, dayKeyOf, newId, percentOf } from './common';
 import { addCharge, clientAccount, passesCreditLimit, registerPayment, updateCreditEntry, voidCreditEntry } from './credit';
 import { addLotterySale, addPrize, closeDay, computeDay, lotteryReport, reopenDay, updateLotterySale, updatePrize, voidLotterySale, voidPrize } from './lottery';
 import { createProduct, updateProduct } from './products';
-import { salesReport, stockAlerts } from './reports';
+import { periodOf, salesReport, stockAlerts, weekOf } from './reports';
 import { createSale, receiptNumber, returnItems, voidSale } from './sales';
 import { countCorrection, manualMovement } from './stock';
 import { ownerByPin, verifyPin } from './users';
@@ -507,6 +507,33 @@ describe('lotería (el cuadre del día)', () => {
     const report = await lotteryReport(w.db, '2000-01-01', today());
     expect(report.totals).toMatchObject({ salesCents: 100000, commissionCents: 10000, prizesCents: 20000, deliverCents: 70000 });
     expect(report.days).toHaveLength(1);
+  });
+
+  it('la semana de cierre va de lunes a domingo, con la comisión de cada lotería; quitar o corregir guarda el porqué', async () => {
+    expect(weekOf('2026-11-04')).toEqual({ from: '2026-11-02', to: '2026-11-08' });
+    expect(weekOf('2026-11-08')).toEqual({ from: '2026-11-02', to: '2026-11-08' });
+    expect(weekOf('2026-11-09')).toEqual({ from: '2026-11-09', to: '2026-11-15' });
+    const wednesday = new Date('2026-11-04T12:00:00');
+    expect(periodOf('week', wednesday)).toEqual({ from: '2026-11-02', to: '2026-11-04' });
+    expect(periodOf('lastWeek', wednesday)).toEqual({ from: '2026-10-26', to: '2026-11-01' });
+
+    const w = await newWorld();
+    await addLotterySale(w.db, { amountCents: 10000, clientName: 'Ana', lottery: 'Nacional', userId: w.owner.id, requestId: newId() });
+    await addLotterySale(w.db, { amountCents: 5000, clientName: 'Luis', lottery: 'Leidsa', userId: w.owner.id, requestId: newId() });
+    const prize = await addPrize(w.db, { amountCents: 2000, clientName: 'Victor', lottery: 'Nacional', userId: w.owner.id, requestId: newId() });
+    await updatePrize(w.db, prize.id, { clientName: 'Pedro', amountCents: 2000, lottery: 'Nacional', note: 'se lo puse a Victor por error' }, w.owner.id);
+    expect(await w.db.prizes.get(prize.id)).toMatchObject({ clientName: 'Pedro', note: 'se lo puse a Victor por error' });
+    await voidPrize(w.db, prize.id, w.owner.id, 'no era premio');
+    expect((await w.db.prizes.get(prize.id))!.voidReason).toBe('no era premio');
+
+    const week = weekOf(today());
+    const report = await lotteryReport(w.db, week.from, week.to);
+    const pct = (await computeDay(w.db, today())).totals.commissionPct;
+    expect(report.byLottery.map(l => [l.name, l.salesCents, l.commissionCents, l.prizesCents])).toEqual([
+      ['Nacional', 10000, percentOf(10000, pct), 0],
+      ['Leidsa', 5000, percentOf(5000, pct), 0],
+    ]);
+    expect(report.totals.salesCents).toBe(15000);
   });
 
   it('si los premios pasan la venta, lo que se entrega queda en negativo (faltante)', async () => {

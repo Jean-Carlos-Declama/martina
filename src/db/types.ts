@@ -177,8 +177,11 @@ export interface LotteryEntry {
   /** Si se le fió (va a la cuenta del cliente). */
   credit: boolean;
   userId: Id;
+  /** Comentario (ej. por qué se corrigió). */
   note?: string;
   status: 'done' | 'void';
+  /** Por qué se quitó (anuló). */
+  voidReason?: string;
   requestId: string;
 }
 
@@ -192,8 +195,11 @@ export interface Prize {
   amountCents: number;
   lottery?: string;
   userId: Id;
+  /** Comentario (ej. por qué se corrigió). */
   note?: string;
   status: 'done' | 'void';
+  /** Por qué se quitó (anuló). */
+  voidReason?: string;
   requestId: string;
 }
 

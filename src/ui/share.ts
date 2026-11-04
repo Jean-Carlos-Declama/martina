@@ -1,7 +1,7 @@
 import type { Client, Sale, Settings } from '../db/types';
-import type { DayReport } from '../domain/lottery';
+import type { DayReport, LotteryPeriod } from '../domain/lottery';
 import { receiptNumber } from '../domain/sales';
-import { dayLabel, formatDateTime, formatMoney, formatQty, PAYMENT_LABELS } from './format';
+import { dayLabel, formatDateTime, formatMoney, formatQty, PAYMENT_LABELS, rangeLabel } from './format';
 
 // Textos para mandar por WhatsApp (recibo, cuadre de lotería, recordatorio de fiado) y cómo abrirlo.
 
@@ -57,6 +57,31 @@ export function lotteryDayText(report: DayReport, settings: Settings): string {
     t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}* (los premios y la comisión pasaron la venta)` : `*A entregar: ${money(t.deliverCents)}*`,
     report.creditCents > 0 ? `(incluye ${money(report.creditCents)} fiado, por cobrar)` : '',
     report.status === 'closed' ? '(día cerrado)' : '',
+  ]
+    .join('\n')
+    .trim();
+}
+
+/** El cuadre de la semana (lunes a domingo): cada día y el total que se entrega. */
+export function lotteryWeekText(report: LotteryPeriod, settings: Settings): string {
+  const money = (cents: number) => formatMoney(cents, settings.currency);
+  const t = report.totals;
+  const days = report.days.map(
+    d => `${dayLabel(d.dayKey, false)}: venta ${money(d.totals.salesCents)} · comisión ${money(d.totals.commissionCents)} · premios ${money(d.totals.prizesCents)} · ${d.totals.deliverCents < 0 ? 'faltante' : 'entregar'} ${money(d.totals.deliverCents)}`,
+  );
+  const lotteries = report.byLottery.length > 1 ? ['', ...report.byLottery.map(l => `${l.name}: venta ${money(l.salesCents)} · comisión ${money(l.commissionCents)} · premios ${money(l.prizesCents)}`)] : [];
+  return [
+    `*Lotería — ${settings.businessName}*`,
+    `Semana ${rangeLabel(report.from, report.to)}`,
+    '',
+    ...days,
+    ...lotteries,
+    '',
+    `Venta: ${money(t.salesCents)} (${t.salesCount})`,
+    `Comisión: ${money(t.commissionCents)}`,
+    `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
+    t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}*` : `*A entregar: ${money(t.deliverCents)}*`,
+    report.creditCents > 0 ? `(incluye ${money(report.creditCents)} fiado, por cobrar)` : '',
   ]
     .join('\n')
     .trim();

@@ -78,13 +78,27 @@ export async function salesReport(database: MartinaDb, from: string, to: string,
 }
 
 /** Los rangos de siempre: hoy, esta semana (desde el lunes), este mes. */
-export function periodOf(kind: 'today' | 'week' | 'month', today = new Date()): { from: string; to: string } {
+export function periodOf(kind: 'today' | 'week' | 'lastWeek' | 'month', today = new Date()): { from: string; to: string } {
   const to = dayKeyOf(today);
   if (kind === 'today') return { from: to, to };
-  const start = new Date(today);
-  if (kind === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  else start.setDate(1);
-  return { from: dayKeyOf(start), to };
+  if (kind === 'month') return { from: `${to.slice(0, 8)}01`, to };
+  // La semana de cierre va de lunes a domingo: esta semana es del lunes hasta hoy; la pasada, de lunes a domingo.
+  const week = weekOf(to);
+  if (kind === 'week') return { from: week.from, to };
+  return weekOf(shiftKey(week.from, -1));
+}
+
+/** El lunes y el domingo de la semana de un día (la semana de cierre va de lunes a domingo). */
+export function weekOf(dayKey: string): { from: string; to: string } {
+  const monday = shiftKey(dayKey, -((new Date(`${dayKey}T12:00:00`).getDay() + 6) % 7));
+  return { from: monday, to: shiftKey(monday, 6) };
+}
+
+/** Un día (AAAA-MM-DD) más o menos tantos días. */
+function shiftKey(dayKey: string, days: number): string {
+  const date = new Date(`${dayKey}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return dayKeyOf(date);
 }
 
 export interface StockAlerts {

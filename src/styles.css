@@ -1838,3 +1838,15 @@ body:has(.overlay) .toasts {
     padding: 3px 5px;
   }
 }
+
+/* Lotería › Semana: el día que se está viendo resaltado; los días que no han llegado, apagados. */
+.week-days tr.on .cell-link-name {
+  font-weight: 800;
+}
+.week-days tr.future {
+  opacity: 0.45;
+}
+.week-card h2 small {
+  font-size: 14px;
+  font-weight: 600;
+}

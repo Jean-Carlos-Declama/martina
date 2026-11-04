@@ -9,6 +9,7 @@ import {
   addPrize,
   closeDay,
   computeDay,
+  lotteryReport,
   reopenDay,
   setDayCommission,
   updateLotterySale,
@@ -18,12 +19,13 @@ import {
 } from '../../domain/lottery';
 import { normalize } from '../../domain/products';
 import { passesCreditLimit } from '../../domain/credit';
+import { weekOf } from '../../domain/reports';
 import { balanceTone, ClientSuggestions, CreditPreview, showsSuggestions, useCreditClient } from '../clientPick';
 import { useSession, useUi } from '../context';
-import { balanceLabel, dayLabel, formatTime, moneyField, parseMoney, plural, shiftDay } from '../format';
+import { balanceLabel, dayLabel, formatTime, moneyField, parseMoney, plural, rangeLabel, shiftDay } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
-import { lotteryDayText, openWhatsApp, shareText } from '../share';
+import { lotteryDayText, lotteryWeekText, openWhatsApp, shareText } from '../share';
 
 const QUICK_AMOUNTS = [25, 50, 100, 200, 500];
 
@@ -46,7 +48,7 @@ export function DeliverStat({ cents, money, sub }: { cents: number; money: (cent
 /** La libreta de la lotería: anotar jugadas y premios, y el cuadre del día. */
 export function Lottery() {
   const { money, settings, isOwner, canEdit, user, requireOwner } = useSession();
-  const { run, confirm, askText } = useUi();
+  const { run, confirm, askText, toast } = useUi();
   const today = dayKeyOf();
   const [dayKey, setDayKey] = useState(today);
   const [editing, setEditing] = useState<{ entry: Entry; ownerId: string } | null>(null);
@@ -66,8 +68,26 @@ export function Lottery() {
   const editable = open && canEdit;
   const t = report?.totals;
 
+  // Un día cerrado se reabre para quitar o corregir algo (después se puede cerrar otra vez).
+  const ensureOpen = async (): Promise<boolean> => {
+    if (open) return true;
+    if (!isOwner) {
+      toast('Este día está cerrado: pídele a la dueña que lo reabra para corregir.', 'error');
+      return false;
+    }
+    const ok = await confirm({
+      title: 'Este día está cerrado',
+      message: 'Para quitar o corregir algo hay que reabrirlo. Cuando termines, lo cierras otra vez con «Cerrar el día».',
+      okText: 'Reabrir y seguir',
+    });
+    if (!ok) return false;
+    const owner = await requireOwner('Reabrir el día: autorización de la dueña');
+    return !!owner && !!(await run(async () => (await reopenDay(db, dayKey, owner.id, 'Para quitar o corregir un premio o una jugada'), true)));
+  };
+
   const voidEntry = async (entry: Entry) => {
-    const owner = await requireOwner('Anular: autorización de la dueña');
+    if (!(await ensureOpen())) return;
+    const owner = await requireOwner('Quitar: autorización de la dueña');
     if (!owner) return;
     let message = `${entry.clientName}: ${money(entry.amountCents)}`;
     // Una jugada fiada sale de la cuenta del cliente: que se vea cómo queda.
@@ -75,14 +95,15 @@ export function Lottery() {
     if (client)
       message += `\nEra fiada: se le quita de su cuenta. ${client.name}: ahora ${balanceLabel(client.balanceCents, money)}; después ${balanceLabel(client.balanceCents - entry.amountCents, money)}.`;
     const reason = await askText({
-      title: entry.kind === 'play' ? 'Anular jugada' : 'Anular premio',
+      title: entry.kind === 'play' ? 'Quitar jugada' : 'Quitar premio',
       message,
-      label: '¿Por qué se anula?',
-      okText: 'Anular',
+      label: '¿Por qué lo quitas?',
+      placeholder: entry.kind === 'play' ? 'Ej. se anotó dos veces' : 'Ej. se lo puse a otra persona',
+      okText: 'Quitar',
       danger: true,
     });
     if (!reason) return;
-    await run(() => (entry.kind === 'play' ? voidLotterySale(db, entry.id, owner.id, reason) : voidPrize(db, entry.id, owner.id, reason)), 'Anulado');
+    await run(() => (entry.kind === 'play' ? voidLotterySale(db, entry.id, owner.id, reason) : voidPrize(db, entry.id, owner.id, reason)), 'Quitado: el cuadre se recalculó');
   };
 
   const close = async () => {
@@ -121,6 +142,7 @@ export function Lottery() {
   };
 
   const startEdit = async (entry: Entry) => {
+    if (!(await ensureOpen())) return;
     const owner = await requireOwner('Corregir: autorización de la dueña');
     if (owner) setEditing({ entry, ownerId: owner.id });
   };
@@ -185,6 +207,7 @@ export function Lottery() {
           <DeliverStat cents={t.deliverCents} money={money} sub={report.creditCents > 0 && t.deliverCents >= 0 ? `incluye ${money(report.creditCents)} fiado` : undefined} />
         </div>
       )}
+      <WeekCard dayKey={dayKey} onPickDay={setDayKey} />
 
       {!isToday && editable && (
         <p className="notice warn">
@@ -293,11 +316,22 @@ export function Lottery() {
 
       {entries && (
         <div className="two-cols">
-          <EntryList title="Premios pagados" empty="No se ha pagado ningún premio." items={entries.prizes} prizes editable={editable} clientOf={clientOf} onEdit={startEdit} onVoid={voidEntry} />
-          <EntryList title="Jugadas" empty="No hay jugadas." items={entries.plays} editable={editable} clientOf={clientOf} onEdit={startEdit} onVoid={voidEntry} />
+          <EntryList title="Premios pagados" empty="No se ha pagado ningún premio." items={entries.prizes} prizes editable={canEdit} clientOf={clientOf} onEdit={startEdit} onVoid={voidEntry} />
+          <EntryList title="Jugadas" empty="No hay jugadas." items={entries.plays} editable={canEdit} clientOf={clientOf} onEdit={startEdit} onVoid={voidEntry} />
         </div>
       )}
-      {editing && <EditEntryModal entry={editing.entry} ownerId={editing.ownerId} onClose={() => setEditing(null)} />}
+      {editing && (
+        <EditEntryModal
+          entry={editing.entry}
+          ownerId={editing.ownerId}
+          onClose={() => setEditing(null)}
+          onRemove={() => {
+            const entry = editing.entry;
+            setEditing(null);
+            void voidEntry(entry);
+          }}
+        />
+      )}
       {viewingClient && (
         <Suspense fallback={null}>
           <ClientSheet id={viewingClient} onClose={() => setViewingClient(null)} />
@@ -341,8 +375,9 @@ function EntryList(props: {
                 <small className="muted">
                   {formatTime(e.date)}
                   {e.lottery ? ` · ${e.lottery}` : ''}
-                  {e.status === 'void' ? ' · ANULADO' : ''}
+                  {e.status === 'void' ? ` · QUITADO${e.voidReason ? `: ${e.voidReason}` : ''}` : ''}
                 </small>
+                {e.note && e.status === 'done' && <small className="muted">Nota: {e.note}</small>}
                 {e.status === 'done' && <EntryOwes balance={props.clientOf({ clientId: e.clientId, name: e.clientName })?.balanceCents ?? 0} />}
               </span>
               <span className="right">
@@ -354,7 +389,7 @@ function EntryList(props: {
                   <button className="icon-btn" onClick={() => props.onEdit(e)} aria-label="Corregir">
                     <Icon name="edit" size={20} />
                   </button>
-                  <button className="icon-btn" onClick={() => props.onVoid(e)} aria-label="Anular">
+                  <button className="icon-btn" onClick={() => props.onVoid(e)} aria-label="Quitar">
                     <Icon name="trash" size={20} />
                   </button>
                 </span>
@@ -538,7 +573,7 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
 }
 
 /** Corregir una jugada o un premio: el cuadre (y lo que se entrega) se recalcula solo. */
-function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: string; onClose: () => void }) {
+function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; ownerId: string; onClose: () => void; onRemove: () => void }) {
   const { settings, money } = useSession();
   const { run } = useUi();
   const { findClient } = useNameSuggestions();
@@ -546,6 +581,7 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
   const [name, setName] = useState(entry.clientName);
   const [amount, setAmount] = useState(moneyField(entry.amountCents));
   const [lottery, setLottery] = useState(entry.lottery ?? '');
+  const [note, setNote] = useState('');
   const isPlay = entry.kind === 'play';
   const fiada = isPlay && entry.credit;
   // Jugada fiada con el nombre corregido: la deuda pasa de la cuenta del primero a la del nombre correcto.
@@ -570,7 +606,7 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
         newClientName = target.newClientName;
       }
     }
-    const changes = { clientId, newClientName, clientName: name, amountCents: cents, lottery: lottery || undefined };
+    const changes = { clientId, newClientName, clientName: name, amountCents: cents, lottery: lottery || undefined, note };
     const ok = await run(async () => {
       if (isPlay) await updateLotterySale(db, entry.id, changes, ownerId);
       else await updatePrize(db, entry.id, changes, ownerId);
@@ -623,7 +659,11 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
         </p>
       ) : null}
       <div className="row2">
-        <NameField value={name} onChange={setName} hint={fiada ? 'Si el nombre está mal, corrígelo: la deuda pasa a la cuenta correcta.' : undefined} />
+        <NameField
+          value={name}
+          onChange={setName}
+          hint={fiada ? 'Si el nombre está mal, corrígelo: la deuda pasa a la cuenta correcta.' : isPlay ? undefined : 'Si se lo pusiste a otra persona, escribe el nombre correcto.'}
+        />
         <Field label={isPlay ? 'Cuánto jugó' : 'Cuánto se sacó'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} currency={settings.currency} autoFocus />}</Field>
       </div>
       {settings.lotteries.length > 0 && (
@@ -638,7 +678,143 @@ function EditEntryModal({ entry, ownerId, onClose }: { entry: Entry; ownerId: st
           )}
         </Field>
       )}
+      <Field label="Comentario (opcional)" hint="Por qué lo corriges; se queda anotado.">
+        {id => <input id={id} value={note} onChange={e => setNote(e.target.value)} placeholder="Ej. se lo puse a otra persona" />}
+      </Field>
+      <button className="btn danger small" onClick={onRemove}>
+        <Icon name="trash" size={18} /> {isPlay ? 'Quitar esta jugada' : 'Quitar este premio'}
+      </button>
       {prompt}
     </Modal>
+  );
+}
+
+/**
+ * La semana de cierre (lunes a domingo) del día que se está viendo: lo que se va sumando, cada día (tocarlo lo abre),
+ * y la comisión de cada lotería. Se puede mandar por WhatsApp.
+ */
+function WeekCard({ dayKey, onPickDay }: { dayKey: string; onPickDay: (dayKey: string) => void }) {
+  const { money, settings } = useSession();
+  const [showDays, setShowDays] = useState(false);
+  const week = weekOf(dayKey);
+  const report = useLiveQuery(() => lotteryReport(db, week.from, week.to), [week.from, week.to]);
+  const today = dayKeyOf();
+  if (!report) return null;
+  const t = report.totals;
+  const days = Array.from({ length: 7 }, (_, i) => shiftDay(week.from, i));
+  const share = async () => {
+    const text = lotteryWeekText(report, settings);
+    if (!(await shareText(text, 'Cuadre de la semana'))) openWhatsApp(text);
+  };
+  return (
+    <section className="card week-card">
+      <div className="card-head">
+        <h2>
+          Semana <small className="muted">{rangeLabel(week.from, week.to)}</small>
+        </h2>
+        <button className="btn small" onClick={() => setShowDays(v => !v)}>
+          {showDays ? 'Ocultar días' : 'Ver día por día'}
+        </button>
+      </div>
+      <div className="stats">
+        <Stat label="Venta de la semana" value={money(t.salesCents)} sub={plural(t.salesCount, 'jugada', 'jugadas')} />
+        <Stat label="Comisión" value={money(t.commissionCents)} tone="good" sub="lo que te ganas" />
+        <Stat label="Premios" value={money(t.prizesCents)} tone="bad" sub={plural(t.prizesCount, 'premio', 'premios')} />
+        <DeliverStat cents={t.deliverCents} money={money} sub={report.creditCents > 0 && t.deliverCents >= 0 ? `incluye ${money(report.creditCents)} fiado` : undefined} />
+      </div>
+      {showDays && (
+        <>
+          <div className="table-wrap">
+            <table className="table stack week-days">
+              <thead>
+                <tr>
+                  <th>Día</th>
+                  <th className="num">Venta</th>
+                  <th className="num">Comisión</th>
+                  <th className="num">Premios</th>
+                  <th className="num">A entregar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {days.map(d => {
+                  const r = report.days.find(x => x.dayKey === d);
+                  return (
+                    <tr key={d} className={`${d === dayKey ? 'on' : ''}${d > today ? ' future' : ''}`}>
+                      <td>
+                        <button type="button" className="cell-link" disabled={d > today} onClick={() => onPickDay(d)}>
+                          <span className="cell-link-name">{dayLabel(d, false)}</span>
+                          {r?.status === 'closed' && <small className="muted"> (cerrado)</small>}
+                        </button>
+                      </td>
+                      <td className="num" data-label="Venta">
+                        {r ? money(r.totals.salesCents) : '—'}
+                      </td>
+                      <td className="num good-text" data-label={r ? `Comisión ${r.totals.commissionPct}%` : 'Comisión'}>
+                        {r ? money(r.totals.commissionCents) : '—'}
+                      </td>
+                      <td className="num bad-text" data-label="Premios">
+                        {r ? money(r.totals.prizesCents) : '—'}
+                      </td>
+                      <td className={`num ${r && r.totals.deliverCents < 0 ? 'bad-text' : ''}`} data-label={r && r.totals.deliverCents < 0 ? 'Faltante' : 'A entregar'}>
+                        {r ? money(r.totals.deliverCents) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {report.byLottery.length > 1 && <LotteryBreakdown rows={report.byLottery} />}
+        </>
+      )}
+      <div className="actions wrap">
+        <button className="btn small" onClick={() => onPickDay(shiftDay(week.from, -1))}>
+          <Icon name="back" size={18} /> Semana anterior
+        </button>
+        {week.to < today && (
+          <button className="btn small" onClick={() => onPickDay(shiftDay(week.to, 7) > today ? today : shiftDay(week.to, 7))}>
+            Semana siguiente <Icon name="next" size={18} />
+          </button>
+        )}
+        <button className="btn small" onClick={() => void share()} disabled={t.salesCount + t.prizesCount === 0}>
+          <Icon name="share" size={18} /> Enviar la semana
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Cada lotería (banca) con su venta, su comisión y sus premios. */
+export function LotteryBreakdown({ rows }: { rows: { name: string; salesCents: number; commissionCents: number; prizesCents: number }[] }) {
+  const { money } = useSession();
+  return (
+    <div className="table-wrap">
+      <table className="table stack">
+        <thead>
+          <tr>
+            <th>Lotería</th>
+            <th className="num">Venta</th>
+            <th className="num">Comisión</th>
+            <th className="num">Premios</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(l => (
+            <tr key={l.name}>
+              <td>{l.name}</td>
+              <td className="num" data-label="Venta">
+                {money(l.salesCents)}
+              </td>
+              <td className="num good-text" data-label="Comisión">
+                {money(l.commissionCents)}
+              </td>
+              <td className="num bad-text" data-label="Premios">
+                {money(l.prizesCents)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

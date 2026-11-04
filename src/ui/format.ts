@@ -74,6 +74,17 @@ export function balanceLabel(cents: number, money: (cents: number) => string): s
   return cents > 0 ? `debe ${money(cents)}` : cents < 0 ? `a favor ${money(-cents)}` : 'al día';
 }
 
+/** "del 2 al 8 de noviembre" o "del 26 de octubre al 1 de noviembre" (semanas y rangos de fechas). */
+export function rangeLabel(from: string, to: string): string {
+  const start = new Date(`${from}T12:00:00`);
+  const end = new Date(`${to}T12:00:00`);
+  const month = (date: Date) => date.toLocaleDateString('es-DO', { month: 'long' });
+  const year = end.getFullYear() !== new Date().getFullYear() ? ` de ${end.getFullYear()}` : '';
+  return start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()
+    ? `del ${start.getDate()} al ${end.getDate()} de ${month(end)}${year}`
+    : `del ${start.getDate()} de ${month(start)} al ${end.getDate()} de ${month(end)}${year}`;
+}
+
 /** "lunes, 27 de octubre de 2026" a partir de AAAA-MM-DD. */
 export function dayLabel(dayKey: string, withYear = true): string {
   const date = new Date(`${dayKey}T12:00:00`);
