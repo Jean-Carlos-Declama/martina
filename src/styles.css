@@ -1471,10 +1471,10 @@ button.chip {
   font-weight: 500;
 }
 
-/* Las 4 formas de pago siempre completas (en el teléfono, dos y dos). */
+/* Las 6 formas de pago siempre completas: de tres en tres (en el teléfono, de dos en dos). */
 .segmented.pay-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
 }
 .segmented.pay-tabs button {
   padding: 0 6px;

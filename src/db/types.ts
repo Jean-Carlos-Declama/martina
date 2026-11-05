@@ -92,7 +92,7 @@ export interface Movement {
   docId?: Id;
 }
 
-export type PaymentMethod = 'cash' | 'transfer' | 'card' | 'credit';
+export type PaymentMethod = 'cash' | 'zelle' | 'cashapp' | 'transfer' | 'card' | 'credit';
 
 export interface SaleLine {
   productId: Id;

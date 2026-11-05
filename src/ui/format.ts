@@ -101,8 +101,11 @@ export function shiftDay(dayKey: string, days: number): string {
   return `${date.getFullYear()}-${m}-${d}`;
 }
 
+/** Las formas de pago, en el orden en que salen al cobrar. */
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
+  zelle: 'Zelle',
+  cashapp: 'Cash App',
   transfer: 'Transferencia',
   card: 'Tarjeta',
   credit: 'Fiado',

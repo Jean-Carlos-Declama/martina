@@ -81,6 +81,7 @@ Una app para el iPad de Martina con dos partes:
 - **Sin doble cobro:** cada venta lleva una llave única (`requestId`). Si tocan dos veces o se reintenta, devuelve la misma venta y no la duplica (también lo cubre una prueba).
 - **Anular y devolver:** solo lo puede hacer la dueña o alguien con su PIN. Se pide el motivo y se hacen movimientos contrarios, así que nunca se borra nada. Si la venta era fiada, se le rebaja al cliente.
 - **Reportes:** las devoluciones restan el día en que se devolvió el dinero.
+- **Formas de pago (0.5.3):** Efectivo, Zelle, Cash App, Transferencia, Tarjeta y Fiado. Solo Efectivo pide lo recibido y calcula la devuelta. En Ventas se ve cuánto entró por cada una en el día.
 
 ## 6. Lotería
 

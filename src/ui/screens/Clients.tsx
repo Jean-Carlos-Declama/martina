@@ -481,7 +481,7 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
 
 /** Sugerencias de siempre (van después de las que ya se usaron). */
 const COMMON_NOTES: Record<'payment' | 'charge', string[]> = {
-  payment: ['Pagó en efectivo', 'Pagó por transferencia', 'Abono de la quincena'],
+  payment: ['Pagó en efectivo', 'Pagó por Zelle', 'Pagó por Cash App', 'Pagó por transferencia', 'Abono de la quincena'],
   charge: ['Lo que debía en la libreta', 'Fiado que no se anotó', 'Préstamo', 'Lotería fiada', 'Compra en la tienda'],
 };
 
