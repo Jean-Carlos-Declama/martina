@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import { db } from '../../db/database';
-import type { Client, LotteryEntry, Prize } from '../../db/types';
+import type { Client, LotteryEntry, PaymentMethod, Prize } from '../../db/types';
 import { exactClient, nameKey } from '../../domain/clients';
 import { dayKeyOf, newId } from '../../domain/common';
 import {
@@ -10,6 +10,7 @@ import {
   closeDay,
   computeDay,
   lotteryReport,
+  playPayment,
   reopenDay,
   setDayCommission,
   updateLotterySale,
@@ -22,7 +23,7 @@ import { passesCreditLimit } from '../../domain/credit';
 import { weekOf } from '../../domain/reports';
 import { balanceTone, ClientSuggestions, CreditPreview, showsSuggestions, useCreditClient } from '../clientPick';
 import { useSession, useUi } from '../context';
-import { balanceLabel, dayLabel, formatTime, moneyField, parseMoney, plural, rangeLabel, shiftDay } from '../format';
+import { balanceLabel, dayLabel, formatTime, moneyField, parseMoney, PAYMENT_LABELS, plural, rangeLabel, shiftDay } from '../format';
 import { Icon } from '../icons';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
 import { lotteryDayText, lotteryWeekText, openWhatsApp, shareText } from '../share';
@@ -207,6 +208,7 @@ export function Lottery() {
           <DeliverStat cents={t.deliverCents} money={money} sub={report.creditCents > 0 && t.deliverCents >= 0 ? `incluye ${money(report.creditCents)} fiado` : undefined} />
         </div>
       )}
+      {report && <PaymentSplit rows={report.byPayment} />}
       <WeekCard dayKey={dayKey} onPickDay={setDayKey} />
 
       {!isToday && editable && (
@@ -383,6 +385,7 @@ function EntryList(props: {
               <span className="right">
                 <span className={`amount ${isPrize || (e.kind === 'play' && e.credit) ? 'bad-text' : ''}`}>{money(e.amountCents)}</span>
                 {e.kind === 'play' && e.credit && <span className="tag out">Fiado</span>}
+                {e.kind === 'play' && !e.credit && playPayment(e) !== 'cash' && <span className="tag">{PAYMENT_LABELS[playPayment(e)]}</span>}
               </span>
               {props.editable && e.status === 'done' && (
                 <span className="row-tools">
@@ -456,13 +459,13 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [lottery, setLottery] = useState(settings.lotteries[0] ?? '');
-  const [credit, setCredit] = useState(false);
+  const [payment, setPayment] = useState<PaymentMethod>('cash');
   const [requestId, setRequestId] = useState(newId);
   const [busy, setBusy] = useState(false);
   const client = exactClient(name, clients);
   const cents = parseMoney(amount);
   const pastDay = dayKey !== dayKeyOf();
-  const fiado = kind === 'play' && credit;
+  const fiado = kind === 'play' && payment === 'credit';
   const overLimit = fiado && !!client && !!cents && passesCreditLimit(client, cents);
 
   const submit = async () => {
@@ -489,13 +492,13 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
       } else newClientName = target.newClientName;
     }
     const base = { clientId, clientName: name, amountCents: cents, lottery: lottery || undefined, userId: byUser, requestId, dayKey };
-    const done = await run(() => (kind === 'play' ? addLotterySale(db, { ...base, credit, newClientName }) : addPrize(db, base)));
+    const done = await run(() => (kind === 'play' ? addLotterySale(db, { ...base, credit: fiado, payment, newClientName }) : addPrize(db, base)));
     setBusy(false);
     if (done) {
       toast(`${kind === 'play' ? 'Jugada' : 'Premio'} de ${done.clientName}: ${money(done.amountCents)}${newClientName ? ' (se registró como cliente)' : ''}`);
       setName('');
       setAmount('');
-      setCredit(false);
+      setPayment('cash');
       setRequestId(newId());
     }
   };
@@ -551,17 +554,23 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
             </Field>
           )}
         </div>
+        {kind === 'play' && (
+          <div className="field pay-field">
+            <span className="field-label">Cómo pagó</span>
+            <Segmented
+              className="pay-tabs"
+              value={payment}
+              onChange={setPayment}
+              options={(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map(p => ({ value: p, label: PAYMENT_LABELS[p] }))}
+            />
+          </div>
+        )}
         <div className="quick">
           {QUICK_AMOUNTS.map(v => (
             <button type="button" key={v} className="btn small" onClick={() => setAmount(String(v))}>
               {v}
             </button>
           ))}
-          {kind === 'play' && (
-            <label className="check">
-              <input type="checkbox" checked={credit} onChange={e => setCredit(e.target.checked)} /> Fiado
-            </label>
-          )}
           <button className={`btn ${kind === 'play' ? 'primary' : 'danger'} grow`} type="submit" disabled={busy || overLimit}>
             <Icon name={kind === 'play' ? 'plus' : 'prize'} /> {kind === 'play' ? 'Anotar jugada' : 'Pagar premio'}
           </button>
@@ -582,6 +591,7 @@ function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; o
   const [amount, setAmount] = useState(moneyField(entry.amountCents));
   const [lottery, setLottery] = useState(entry.lottery ?? '');
   const [note, setNote] = useState('');
+  const [payment, setPayment] = useState<PaymentMethod>(entry.kind === 'play' ? playPayment(entry) : 'cash');
   const isPlay = entry.kind === 'play';
   const fiada = isPlay && entry.credit;
   // Jugada fiada con el nombre corregido: la deuda pasa de la cuenta del primero a la del nombre correcto.
@@ -606,7 +616,7 @@ function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; o
         newClientName = target.newClientName;
       }
     }
-    const changes = { clientId, newClientName, clientName: name, amountCents: cents, lottery: lottery || undefined, note };
+    const changes = { clientId, newClientName, clientName: name, amountCents: cents, lottery: lottery || undefined, note, payment: isPlay && !fiada ? payment : undefined };
     const ok = await run(async () => {
       if (isPlay) await updateLotterySale(db, entry.id, changes, ownerId);
       else await updatePrize(db, entry.id, changes, ownerId);
@@ -678,6 +688,21 @@ function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; o
           )}
         </Field>
       )}
+      {isPlay && !fiada && (
+        <Field label="Cómo pagó">
+          {id => (
+            <select id={id} value={payment} onChange={e => setPayment(e.target.value as PaymentMethod)}>
+              {(Object.keys(PAYMENT_LABELS) as PaymentMethod[])
+                .filter(p => p !== 'credit')
+                .map(p => (
+                  <option key={p} value={p}>
+                    {PAYMENT_LABELS[p]}
+                  </option>
+                ))}
+            </select>
+          )}
+        </Field>
+      )}
       <Field label="Comentario (opcional)" hint="Por qué lo corriges; se queda anotado.">
         {id => <input id={id} value={note} onChange={e => setNote(e.target.value)} placeholder="Ej. se lo puse a otra persona" />}
       </Field>
@@ -722,6 +747,7 @@ function WeekCard({ dayKey, onPickDay }: { dayKey: string; onPickDay: (dayKey: s
         <Stat label="Premios" value={money(t.prizesCents)} tone="bad" sub={plural(t.prizesCount, 'premio', 'premios')} />
         <DeliverStat cents={t.deliverCents} money={money} sub={report.creditCents > 0 && t.deliverCents >= 0 ? `incluye ${money(report.creditCents)} fiado` : undefined} />
       </div>
+      <PaymentSplit rows={report.byPayment} />
       {showDays && (
         <>
           <div className="table-wrap">
@@ -781,6 +807,21 @@ function WeekCard({ dayKey, onPickDay }: { dayKey: string; onPickDay: (dayKey: s
         </button>
       </div>
     </section>
+  );
+}
+
+/** "Cómo pagaron": cuánto entró en efectivo, por Zelle, Cash App... (solo si no fue todo en efectivo). */
+export function PaymentSplit({ rows }: { rows: { payment: PaymentMethod; cents: number }[] }) {
+  const { money } = useSession();
+  if (!rows.some(p => p.payment !== 'cash')) return null;
+  return (
+    <ul className="chips lottery-chips" aria-label="Cómo pagaron">
+      {rows.map(p => (
+        <li key={p.payment} className={`chip ${p.payment === 'credit' ? 'bad' : ''}`}>
+          {PAYMENT_LABELS[p.payment]}: <strong>{money(p.cents)}</strong>
+        </li>
+      ))}
+    </ul>
   );
 }
 

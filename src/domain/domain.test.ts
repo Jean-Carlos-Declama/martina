@@ -539,6 +539,30 @@ describe('lotería (el cuadre del día)', () => {
     expect(report.totals.salesCents).toBe(15000);
   });
 
+  it('cada jugada guarda cómo pagó (efectivo, Zelle, Cash App, fiado) y el cuadre dice cuánto entró por cada una', async () => {
+    const w = await newWorld();
+    const ana = await newClient(w.db, 'Ana');
+    await addLotterySale(w.db, { amountCents: 10000, clientName: 'Luis', userId: w.owner.id, requestId: newId() });
+    const zelle = await addLotterySale(w.db, { amountCents: 5000, clientName: 'Rosa', payment: 'zelle', userId: w.owner.id, requestId: newId() });
+    await addLotterySale(w.db, { amountCents: 3000, clientName: 'Juan', payment: 'cashapp', userId: w.owner.id, requestId: newId() });
+    const fiada = await addLotterySale(w.db, { amountCents: 2000, clientId: ana, payment: 'credit', userId: w.owner.id, requestId: newId() });
+    expect(fiada).toMatchObject({ credit: true, payment: 'credit' });
+    expect((await w.db.clients.get(ana))!.balanceCents).toBe(2000);
+    let day = await computeDay(w.db, today());
+    expect(day.byPayment).toEqual([
+      { payment: 'cash', cents: 10000 },
+      { payment: 'zelle', cents: 5000 },
+      { payment: 'cashapp', cents: 3000 },
+      { payment: 'credit', cents: 2000 },
+    ]);
+    // Corregir la forma de pago de una que no es fiada; las viejas sin forma de pago cuentan como efectivo o fiado.
+    await updateLotterySale(w.db, zelle.id, { clientName: 'Rosa', amountCents: 5000, payment: 'cash' }, w.owner.id);
+    await w.db.lottery.add({ ...zelle, id: newId(), requestId: newId(), payment: undefined, amountCents: 100 });
+    day = await computeDay(w.db, today());
+    expect(day.byPayment.find(p => p.payment === 'cash')!.cents).toBe(15100);
+    expect(day.byPayment.find(p => p.payment === 'zelle')).toBeUndefined();
+  });
+
   it('si los premios pasan la venta, lo que se entrega queda en negativo (faltante)', async () => {
     const w = await newWorld();
     await saveSettings({ ...(await getSettings(w.db)), commissionPct: 20 }, w.db);

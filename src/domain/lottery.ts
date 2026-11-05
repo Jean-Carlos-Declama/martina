@@ -1,5 +1,5 @@
 import { getSettings, type MartinaDb } from '../db/database';
-import type { Day, DayTotals, Id, LotteryEntry, Prize } from '../db/types';
+import type { Day, DayTotals, Id, LotteryEntry, PaymentMethod, Prize } from '../db/types';
 import { audit } from './audit';
 import { createClient } from './clients';
 import { BusinessError, dayKeyOf, newId, nowIso, percentOf } from './common';
@@ -43,6 +43,8 @@ export interface LotteryInput {
   lottery?: string;
   /** Fiado: va a la cuenta del cliente (tiene que estar registrado, o venir en newClientName). */
   credit?: boolean;
+  /** Cómo pagó (efectivo, Zelle, Cash App...). 'credit' es lo mismo que fiado. */
+  payment?: PaymentMethod;
   /** Fiado a alguien que no está registrado: se registra como cliente en la misma transacción (si no se anota, tampoco). */
   newClientName?: string;
   note?: string;
@@ -65,7 +67,8 @@ function targetDay(dayKey?: string): string {
 /** Anota lo que jugó un cliente (hoy, o en un día anterior que siga abierto). */
 export async function addLotterySale(database: MartinaDb, input: LotteryInput): Promise<LotteryEntry> {
   if (!(input.amountCents > 0)) throw new BusinessError('La cantidad tiene que ser mayor que cero.');
-  if (input.credit && !input.clientId && !input.newClientName?.trim()) throw new BusinessError('Para fiar hay que escoger el cliente.');
+  const credit = !!input.credit || input.payment === 'credit';
+  if (credit && !input.clientId && !input.newClientName?.trim()) throw new BusinessError('Para fiar hay que escoger el cliente.');
   const dayKey = targetDay(input.dayKey);
   const tables = [database.lottery, database.days, database.settings, database.clients, database.credit, database.audit];
   return database.transaction('rw', tables, async () => {
@@ -81,7 +84,8 @@ export async function addLotterySale(database: MartinaDb, input: LotteryInput): 
       clientName: await nameFor(database, clientId, input.clientName),
       amountCents: Math.round(input.amountCents),
       lottery: input.lottery?.trim() || undefined,
-      credit: !!input.credit,
+      credit,
+      payment: credit ? 'credit' : (input.payment ?? 'cash'),
       userId: input.userId,
       note: input.note?.trim() || undefined,
       status: 'done',
@@ -102,6 +106,8 @@ export interface EntryChanges {
   newClientName?: string;
   /** Comentario: por qué se corrige (se queda en la jugada o el premio). */
   note?: string;
+  /** Cómo pagó (solo jugadas que no son fiadas: fiar o dejar de fiar se hace quitándola y anotándola otra vez). */
+  payment?: PaymentMethod;
   amountCents: number;
   lottery?: string;
 }
@@ -125,6 +131,7 @@ export async function updateLotterySale(database: MartinaDb, entryId: Id, change
       amountCents: amount,
       lottery: changes.lottery?.trim() || undefined,
       ...(changes.note?.trim() ? { note: changes.note.trim() } : {}),
+      ...(!entry.credit && changes.payment && changes.payment !== 'credit' ? { payment: changes.payment } : {}),
     });
     if (entry.credit && clientId !== entry.clientId) {
       // El nombre estaba mal: la deuda sale de la cuenta del primero y pasa (con el monto corregido) a la del correcto.
@@ -224,6 +231,9 @@ export async function voidPrize(database: MartinaDb, prizeId: Id, userId: Id, re
   });
 }
 
+/** Cómo se pagó una jugada (las anotadas antes de haber formas de pago: fiada o efectivo). */
+export const playPayment = (entry: Pick<LotteryEntry, 'payment' | 'credit'>): PaymentMethod => entry.payment ?? (entry.credit ? 'credit' : 'cash');
+
 /** Una fila del cuadre: un cliente con lo que jugó y los premios que cobró ese día. */
 export interface DayClientRow {
   name: string;
@@ -248,6 +258,8 @@ export interface DayReport {
   byLottery: { name: string; salesCents: number; prizesCents: number }[];
   /** Lo que se fió ese día (no entró en efectivo, pero igual se entrega). */
   creditCents: number;
+  /** Cuánto entró por cada forma de pago (efectivo, Zelle, Cash App, fiado...), de más a menos. */
+  byPayment: { payment: PaymentMethod; cents: number }[];
 }
 
 /** Calcula el cuadre de un día con lo anotado (con el % de comisión de ese día). */
@@ -281,6 +293,7 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
 
   let salesCents = 0;
   let creditCents = 0;
+  const payments = new Map<PaymentMethod, number>();
   for (const entry of entries) {
     const r = row(entry.clientName, entry.clientId);
     r.purchases++;
@@ -289,6 +302,8 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
     salesCents += entry.amountCents;
     if (entry.credit) creditCents += entry.amountCents;
     lottery(entry.lottery).salesCents += entry.amountCents;
+    const paid = playPayment(entry);
+    payments.set(paid, (payments.get(paid) ?? 0) + entry.amountCents);
   }
   let prizesCents = 0;
   for (const prize of prizes) {
@@ -314,6 +329,7 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
     totals,
     clients: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name, 'es')),
     byLottery: [...lotteries.values()].sort((a, b) => b.salesCents - a.salesCents),
+    byPayment: [...payments].map(([payment, cents]) => ({ payment, cents })).sort((a, b) => b.cents - a.cents),
     creditCents,
   };
 }
@@ -370,6 +386,8 @@ export interface LotteryPeriod {
   byLottery: { name: string; salesCents: number; commissionCents: number; prizesCents: number }[];
   /** Lo que se fió en el período (no entró en efectivo). */
   creditCents: number;
+  /** Cuánto entró por cada forma de pago en el período. */
+  byPayment: { payment: PaymentMethod; cents: number }[];
 }
 
 /** La lotería de varios días (semana, mes): cada día con su propio % de comisión, y la suma. */
@@ -379,11 +397,13 @@ export async function lotteryReport(database: MartinaDb, from: string, to: strin
   for (const p of await database.prizes.where('dayKey').between(from, to, true, true).toArray()) keys.add(p.dayKey);
   const days: LotteryPeriod['days'] = [];
   const lotteries = new Map<string, { name: string; salesCents: number; commissionCents: number; prizesCents: number }>();
+  const payments = new Map<PaymentMethod, number>();
   let creditCents = 0;
   for (const dayKey of [...keys].sort()) {
     const report = await computeDay(database, dayKey);
     days.push({ dayKey, status: report.status, totals: report.totals });
     creditCents += report.creditCents;
+    for (const p of report.byPayment) payments.set(p.payment, (payments.get(p.payment) ?? 0) + p.cents);
     for (const l of report.byLottery) {
       const row = lotteries.get(l.name) ?? { name: l.name, salesCents: 0, commissionCents: 0, prizesCents: 0 };
       row.salesCents += l.salesCents;
@@ -406,6 +426,7 @@ export async function lotteryReport(database: MartinaDb, from: string, to: strin
       deliverCents: sum('deliverCents'),
     },
     byLottery: [...lotteries.values()].sort((a, b) => b.salesCents - a.salesCents),
+    byPayment: [...payments].map(([payment, cents]) => ({ payment, cents })).sort((a, b) => b.cents - a.cents),
     creditCents,
   };
 }

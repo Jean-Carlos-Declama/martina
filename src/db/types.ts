@@ -176,6 +176,8 @@ export interface LotteryEntry {
   lottery?: string;
   /** Si se le fió (va a la cuenta del cliente). */
   credit: boolean;
+  /** Cómo pagó (efectivo, Zelle, Cash App...). Las viejas no lo tienen: fiada = 'credit', si no 'cash'. */
+  payment?: PaymentMethod;
   userId: Id;
   /** Comentario (ej. por qué se corrigió). */
   note?: string;

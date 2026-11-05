@@ -1850,3 +1850,13 @@ body:has(.overlay) .toasts {
   font-size: 14px;
   font-weight: 600;
 }
+
+/* Lotería › "Cómo pagó": el título va como el de los demás campos. */
+.field > .field-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.pay-field {
+  margin-top: 12px;
+}

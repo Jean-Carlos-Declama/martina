@@ -7,7 +7,7 @@ import { inventorySummary, periodOf, salesReport } from '../../domain/reports';
 import { useSession } from '../context';
 import { dayLabel, formatQty, plural, rangeLabel, shiftDay } from '../format';
 import { Empty, Segmented, Stat } from '../kit';
-import { DeliverStat, LotteryBreakdown } from './Lottery';
+import { DeliverStat, LotteryBreakdown, PaymentSplit } from './Lottery';
 
 type Period = 'today' | 'week' | 'lastWeek' | 'month' | 'day' | 'custom';
 
@@ -73,6 +73,7 @@ export default function Reports({ goDebts }: { goDebts: () => void }) {
               <Stat label="Premios" value={money(lottery.totals.prizesCents)} tone="bad" sub={plural(lottery.totals.prizesCount, 'pagado', 'pagados')} />
               <DeliverStat cents={lottery.totals.deliverCents} money={money} />
             </div>
+            <PaymentSplit rows={lottery.byPayment} />
             <div className="table-wrap">
               {/* En el teléfono cada día es una tarjetita con sus 4 números (sin deslizar de lado). */}
               <table className="table stack">

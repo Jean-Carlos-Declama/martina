@@ -37,6 +37,11 @@ export function receiptText(sale: Sale, settings: Settings, clientBalanceCents?:
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** "Cómo pagaron: Efectivo RD$ 300 · Zelle RD$ 200" (vacío si todo fue en efectivo). */
+function paidBy(rows: { payment: Sale['payment']; cents: number }[], money: (cents: number) => string): string {
+  return rows.some(p => p.payment !== 'cash') ? `Cómo pagaron: ${rows.map(p => `${PAYMENT_LABELS[p.payment]} ${money(p.cents)}`).join(' · ')}` : '';
+}
+
 export function lotteryDayText(report: DayReport, settings: Settings): string {
   const money = (cents: number) => formatMoney(cents, settings.currency);
   const t = report.totals;
@@ -52,6 +57,7 @@ export function lotteryDayText(report: DayReport, settings: Settings): string {
     ...rows,
     '',
     `Venta: ${money(t.salesCents)} (${t.salesCount})`,
+    ...[paidBy(report.byPayment, money)].filter(Boolean),
     `Comisión ${t.commissionPct}%: ${money(t.commissionCents)}`,
     `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
     t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}* (los premios y la comisión pasaron la venta)` : `*A entregar: ${money(t.deliverCents)}*`,
@@ -78,6 +84,7 @@ export function lotteryWeekText(report: LotteryPeriod, settings: Settings): stri
     ...lotteries,
     '',
     `Venta: ${money(t.salesCents)} (${t.salesCount})`,
+    ...[paidBy(report.byPayment, money)].filter(Boolean),
     `Comisión: ${money(t.commissionCents)}`,
     `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
     t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}*` : `*A entregar: ${money(t.deliverCents)}*`,

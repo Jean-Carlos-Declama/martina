@@ -77,7 +77,7 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
   return (
     <div className={`segmented ${props.className ?? ''}`} role="tablist">
       {props.options.map(o => (
-        <button key={o.value} role="tab" aria-selected={props.value === o.value} className={props.value === o.value ? 'on' : ''} onClick={() => props.onChange(o.value)}>
+        <button key={o.value} type="button" role="tab" aria-selected={props.value === o.value} className={props.value === o.value ? 'on' : ''} onClick={() => props.onChange(o.value)}>
           {o.label}
         </button>
       ))}

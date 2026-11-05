@@ -82,7 +82,7 @@ await nav('Lotería');
 const play = async (name, amount, credit = false) => {
   await page.getByLabel('Cliente').fill(name);
   await page.getByLabel('Cuánto jugó').fill(amount);
-  if (credit) await page.getByLabel('Fiado').check();
+  if (credit) await page.getByRole('tab', { name: 'Fiado' }).click();
   await page.getByRole('button', { name: 'Anotar jugada' }).click();
   await page.waitForTimeout(350);
 };
@@ -226,7 +226,7 @@ await page.setViewportSize({ width: 1180, height: 820 });
 await nav('Lotería');
 await page.getByLabel('Cliente', { exact: true }).fill('pedro');
 await page.getByLabel('Cuánto jugó').fill('100');
-await page.getByLabel('Fiado').check();
+await page.getByRole('tab', { name: 'Fiado' }).click();
 await page.getByRole('button', { name: 'Anotar jugada' }).click();
 await page.getByRole('heading', { name: '¿A quién se le fía?' }).waitFor();
 await shot('m32-a-quien', modal());
