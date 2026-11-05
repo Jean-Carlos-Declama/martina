@@ -7,6 +7,7 @@ import { receiptNumber, refundOf, refundsBetween, returnItems, voidSale } from '
 import { useSession, useUi } from '../context';
 import { dayLabel, formatQty, formatTime, parseQty, PAYMENT_LABELS, plural, shiftDay } from '../format';
 import { Icon } from '../icons';
+import { PayLogo, PayTag } from '../payLogos';
 import { Empty, Modal, Stat } from '../kit';
 import { ReceiptModal } from './Sell';
 
@@ -49,7 +50,13 @@ export default function SalesHistory() {
         <Stat label="Vendido" value={money(total - refunded)} sub={`${plural(done.length, 'venta', 'ventas')}${refunded > 0 ? ' · menos lo devuelto' : ''}`} big />
         {refunded > 0 && <Stat label="Devuelto" value={`−${money(refunded)}`} tone="bad" />}
         {Object.entries(byPayment).map(([payment, cents]) => (
-          <Stat key={payment} label={PAYMENT_LABELS[payment as Sale['payment']]} value={money(cents)} />
+          <Stat
+            key={payment}
+            className={`pay pay-${payment}`}
+            icon={<PayLogo payment={payment as Sale['payment']} size={16} />}
+            label={PAYMENT_LABELS[payment as Sale['payment']]}
+            value={money(cents)}
+          />
         ))}
       </div>
       {sales && sales.length === 0 ? (
@@ -64,13 +71,14 @@ export default function SalesHistory() {
                   <strong>{s.clientName ?? 'Cliente general'}</strong>
                   <small className="muted">
                     {formatTime(s.date)}
-                    {s.payment !== 'credit' ? ` · ${PAYMENT_LABELS[s.payment]}` : ''} · {plural(s.lines.length, 'producto', 'productos')}
+                    {s.payment === 'cash' ? ` · ${PAYMENT_LABELS.cash}` : ''} · {plural(s.lines.length, 'producto', 'productos')}
                     {s.status === 'void' ? ' · ANULADA' : ''}
                   </small>
                 </span>
                 <span className="right">
                   <span className={`amount ${s.payment === 'credit' ? 'bad-text' : ''}`}>{money(s.totalCents)}</span>
                   {s.payment === 'credit' && <span className="tag out">Fiado</span>}
+                  {s.payment !== 'credit' && s.payment !== 'cash' && <PayTag payment={s.payment} />}
                 </span>
               </button>
             </li>

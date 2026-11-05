@@ -9,8 +9,9 @@ import { matchesSearch } from '../../domain/products';
 import { createSale, receiptNumber } from '../../domain/sales';
 import { ClientSuggestions, CreditPreview, showsSuggestions, useCreditClient, type CreditTarget } from '../clientPick';
 import { useSession, useUi } from '../context';
-import { formatQty, moneyField, parseMoney, parseQty, PAYMENT_LABELS, qtyWithUnit } from '../format';
+import { formatQty, moneyField, parseMoney, parseQty, qtyWithUnit } from '../format';
 import { Icon } from '../icons';
+import { payOptions } from '../payLogos';
 import { Empty, Field, Modal, MoneyInput, PhotoThumb, Segmented } from '../kit';
 import { openWhatsApp, receiptText, shareText } from '../share';
 
@@ -390,7 +391,7 @@ function Checkout({ subtotal, onClose, onPay }: { subtotal: number; onClose: () 
         className="pay-tabs"
         value={payment}
         onChange={setPayment}
-        options={(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map(p => ({ value: p, label: PAYMENT_LABELS[p] }))}
+        options={payOptions()}
       />
       <div className="row2">
         <Field

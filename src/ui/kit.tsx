@@ -73,11 +73,20 @@ export function MoneyInput(props: { id?: string; value: string; onChange: (text:
   );
 }
 
-export function Segmented<T extends string>(props: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void; className?: string }) {
+export function Segmented<T extends string>(props: { value: T; options: { value: T; label: string; icon?: ReactNode }[]; onChange: (value: T) => void; className?: string }) {
   return (
     <div className={`segmented ${props.className ?? ''}`} role="tablist">
       {props.options.map(o => (
-        <button key={o.value} type="button" role="tab" aria-selected={props.value === o.value} className={props.value === o.value ? 'on' : ''} onClick={() => props.onChange(o.value)}>
+        <button
+          key={o.value}
+          type="button"
+          role="tab"
+          data-value={o.value}
+          aria-selected={props.value === o.value}
+          className={props.value === o.value ? 'on' : ''}
+          onClick={() => props.onChange(o.value)}
+        >
+          {o.icon}
           {o.label}
         </button>
       ))}
@@ -85,10 +94,13 @@ export function Segmented<T extends string>(props: { value: T; options: { value:
   );
 }
 
-export function Stat(props: { label: string; value: string; tone?: 'good' | 'bad' | 'accent' | 'plain'; sub?: string; big?: boolean }) {
+export function Stat(props: { label: string; value: string; tone?: 'good' | 'bad' | 'accent' | 'plain'; sub?: string; big?: boolean; icon?: ReactNode; className?: string }) {
   return (
-    <div className={`stat ${props.tone ?? 'plain'}${props.big ? ' big' : ''}`} style={{ '--len': props.value.length } as CSSProperties}>
-      <span className="stat-label">{props.label}</span>
+    <div className={`stat ${props.tone ?? 'plain'}${props.big ? ' big' : ''}${props.className ? ` ${props.className}` : ''}`} style={{ '--len': props.value.length } as CSSProperties}>
+      <span className="stat-label">
+        {props.icon}
+        {props.label}
+      </span>
       <strong className="stat-value">{props.value}</strong>
       {props.sub && <span className="stat-sub">{props.sub}</span>}
     </div>

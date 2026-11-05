@@ -25,6 +25,7 @@ import { balanceTone, ClientSuggestions, CreditPreview, showsSuggestions, useCre
 import { useSession, useUi } from '../context';
 import { balanceLabel, dayLabel, formatTime, moneyField, parseMoney, PAYMENT_LABELS, plural, rangeLabel, shiftDay } from '../format';
 import { Icon } from '../icons';
+import { PayLogo, payOptions, PayTag } from '../payLogos';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
 import { lotteryDayText, lotteryWeekText, openWhatsApp, shareText } from '../share';
 
@@ -385,7 +386,7 @@ function EntryList(props: {
               <span className="right">
                 <span className={`amount ${isPrize || (e.kind === 'play' && e.credit) ? 'bad-text' : ''}`}>{money(e.amountCents)}</span>
                 {e.kind === 'play' && e.credit && <span className="tag out">Fiado</span>}
-                {e.kind === 'play' && !e.credit && playPayment(e) !== 'cash' && <span className="tag">{PAYMENT_LABELS[playPayment(e)]}</span>}
+                {e.kind === 'play' && !e.credit && playPayment(e) !== 'cash' && <PayTag payment={playPayment(e)} />}
               </span>
               {props.editable && e.status === 'done' && (
                 <span className="row-tools">
@@ -561,7 +562,7 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
               className="pay-tabs"
               value={payment}
               onChange={setPayment}
-              options={(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map(p => ({ value: p, label: PAYMENT_LABELS[p] }))}
+              options={payOptions()}
             />
           </div>
         )}
@@ -817,7 +818,8 @@ export function PaymentSplit({ rows }: { rows: { payment: PaymentMethod; cents: 
   return (
     <ul className="chips lottery-chips" aria-label="Cómo pagaron">
       {rows.map(p => (
-        <li key={p.payment} className={`chip ${p.payment === 'credit' ? 'bad' : ''}`}>
+        <li key={p.payment} className={`chip pay pay-${p.payment}`}>
+          <PayLogo payment={p.payment} size={16} />
           {PAYMENT_LABELS[p.payment]}: <strong>{money(p.cents)}</strong>
         </li>
       ))}
