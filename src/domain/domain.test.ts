@@ -426,7 +426,10 @@ describe('fiado', () => {
     const ana = await newClient(w.db, 'Ana');
     await createSale(w.db, { lines: [{ productId: p.id, quantity: 1 }], payment: 'credit', clientId: ana, requestId: newId(), userId: w.owner.id });
     await addLotterySale(w.db, { amountCents: 2000, clientId: ana, credit: true, userId: w.owner.id, requestId: newId() });
-    const [fromSale, fromLottery] = await clientAccount(w.db, ana);
+    // Por tipo y no por posición: si se anotan en el mismo milisegundo, el orden entre las dos no es fijo.
+    const account = await clientAccount(w.db, ana);
+    const fromSale = account.find(l => l.kind === 'sale')!;
+    const fromLottery = account.find(l => l.kind === 'lottery')!;
     await expect(updateCreditEntry(w.db, fromSale.id, { amountCents: 1 }, w.owner.id)).rejects.toThrow(/Ventas/);
     await expect(voidCreditEntry(w.db, fromLottery.id, w.owner.id, 'x')).rejects.toThrow(/Lotería/);
   });
