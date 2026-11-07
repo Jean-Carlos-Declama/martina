@@ -1,6 +1,6 @@
 import { add } from 'dexie';
 import type { MartinaDb } from '../db/database';
-import type { CreditEntry, Id } from '../db/types';
+import type { CreditEntry, Id, PaymentMethod } from '../db/types';
 import { audit } from './audit';
 import { BusinessError, dayKeyOf, newId, nowIso } from './common';
 
@@ -47,7 +47,10 @@ function entryDate(dayKey?: string): string {
   return new Date(`${dayKey}T12:00:00`).toISOString();
 }
 
-/** El cliente abona a lo que debe (no puede abonar más de lo que debe). Con `dayKey` se anota en un día anterior. */
+/**
+ * El cliente abona a lo que debe (no puede abonar más de lo que debe). Con `dayKey` se anota en un día anterior;
+ * `payment` dice cómo pagó (efectivo, Zelle, Cash App...).
+ */
 export async function registerPayment(
   database: MartinaDb,
   clientId: Id,
@@ -55,7 +58,9 @@ export async function registerPayment(
   userId: Id,
   note?: string,
   dayKey?: string,
+  payment?: PaymentMethod,
 ): Promise<CreditEntry> {
+  if (payment === 'credit') throw new BusinessError('Un abono no puede ser fiado: escoge cómo pagó.');
   if (!(amountCents > 0)) throw new BusinessError('El abono tiene que ser mayor que cero.');
   const date = entryDate(dayKey);
   return database.transaction('rw', database.clients, database.credit, database.audit, async () => {
@@ -63,8 +68,9 @@ export async function registerPayment(
     if (!client) throw new BusinessError('El cliente no existe.');
     if (amountCents > client.balanceCents) throw new BusinessError(`${client.name} solo debe ${(client.balanceCents / 100).toFixed(2)}.`);
     const entry = await addCredit(database, clientId, -amountCents, 'payment', userId, undefined, note?.trim() || undefined, date);
-    await audit(database, userId, 'abono', 'cliente', clientId, `${amountCents / 100}${dayKey ? ` (${dayKey})` : ''}`);
-    return entry;
+    if (payment) await database.credit.update(entry.id, { payment });
+    await audit(database, userId, 'abono', 'cliente', clientId, `${amountCents / 100}${payment && payment !== 'cash' ? ` por ${payment}` : ''}${dayKey ? ` (${dayKey})` : ''}`);
+    return { ...entry, payment };
   });
 }
 
@@ -100,7 +106,7 @@ function checkManual(entry: CreditEntry | undefined): asserts entry is CreditEnt
 export async function updateCreditEntry(
   database: MartinaDb,
   entryId: Id,
-  changes: { amountCents: number; dayKey?: string; note?: string },
+  changes: { amountCents: number; dayKey?: string; note?: string; payment?: PaymentMethod },
   userId: Id,
 ): Promise<void> {
   if (!(changes.amountCents > 0)) throw new BusinessError('El monto tiene que ser mayor que cero.');
@@ -117,7 +123,12 @@ export async function updateCreditEntry(
     if (diff < 0 && client.balanceCents + diff < 0) throw new BusinessError(`Así ${client.name} quedaría debiendo menos de cero: revisa el monto.`);
     // Si la fecha no cambió de día, se queda la hora original.
     const keepDate = !changes.dayKey || changes.dayKey === dayKeyOf(new Date(entry.date));
-    await database.credit.update(entryId, { amountCents: newAmount, date: keepDate ? entry.date : date, note: changes.note?.trim() || undefined });
+    await database.credit.update(entryId, {
+      amountCents: newAmount,
+      date: keepDate ? entry.date : date,
+      note: changes.note?.trim() || undefined,
+      ...(entry.kind === 'payment' && changes.payment && changes.payment !== 'credit' ? { payment: changes.payment } : {}),
+    });
     if (diff !== 0) await database.clients.update(entry.clientId, { balanceCents: add(diff), ...reactivate(client, diff) });
     await audit(database, userId, 'corregir', 'cuenta', entry.clientId, `${entry.kind === 'payment' ? 'abono' : 'deuda'} ${Math.abs(entry.amountCents) / 100} → ${changes.amountCents / 100}`);
   });

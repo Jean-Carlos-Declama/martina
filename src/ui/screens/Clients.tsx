@@ -1,14 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { db } from '../../db/database';
-import type { Client, CreditEntry } from '../../db/types';
+import type { Client, CreditEntry, PaymentMethod } from '../../db/types';
 import { createClient, exactClient, mergeClients, setClientActive, updateClient } from '../../domain/clients';
 import { dayKeyOf } from '../../domain/common';
 import { addCharge, clientAccount, registerPayment, updateCreditEntry, voidCreditEntry, type AccountLine } from '../../domain/credit';
 import { normalize } from '../../domain/products';
 import { useSession, useUi } from '../context';
-import { balanceLabel, formatPhone, formatWhen, moneyField, parseMoney, plural, shiftDay } from '../format';
+import { balanceLabel, formatPhone, formatWhen, moneyField, parseMoney, PAYMENT_LABELS, plural, shiftDay } from '../format';
 import { Icon } from '../icons';
+import { payOptions, PayTag } from '../payLogos';
 import { Empty, Field, Modal, MoneyInput, Segmented, Stat } from '../kit';
 import { debtText, openWhatsApp } from '../share';
 
@@ -416,6 +417,12 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
                     <td className="when">{formatWhen(h.date)}</td>
                     <td className="what">
                       {lineLabel(h).label}
+                      {h.kind === 'payment' && h.payment ? (
+                        <>
+                          {' '}
+                          <PayTag payment={h.payment} />
+                        </>
+                      ) : null}
                       {lineLabel(h).note ? <small className="muted"> · {lineLabel(h).note}</small> : null}
                       {h.status === 'void' ? <small className="muted"> · ANULADO</small> : null}
                       {(h.kind === 'sale' || h.kind === 'lottery') &&
@@ -481,7 +488,7 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
 
 /** Sugerencias de siempre (van después de las que ya se usaron). */
 const COMMON_NOTES: Record<'payment' | 'charge', string[]> = {
-  payment: ['Pagó en efectivo', 'Pagó por Zelle', 'Pagó por Cash App', 'Pagó por transferencia', 'Abono de la quincena'],
+  payment: ['Abono de la quincena', 'Pagó lo de la semana', 'Pagó lo de la libreta'],
   charge: ['Lo que debía en la libreta', 'Fiado que no se anotó', 'Préstamo', 'Lotería fiada', 'Compra en la tienda'],
 };
 
@@ -538,6 +545,7 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [day, setDay] = useState(dayKeyOf());
+  const [payment, setPayment] = useState<PaymentMethod>('cash');
   const cents = parseMoney(amount);
   const left = client.balanceCents - (cents ?? 0);
   return (
@@ -554,8 +562,10 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
             disabled={!cents || left < 0}
             onClick={async () => {
               const done = await run(
-                () => registerPayment(db, client.id, cents!, userId, note, day),
-                left > 0 ? `Abono de ${money(cents!)}: ${client.name} queda debiendo ${money(left)}` : `${client.name} pagó todo`,
+                () => registerPayment(db, client.id, cents!, userId, note, day, payment),
+                left > 0
+                  ? `Abono de ${money(cents!)} (${PAYMENT_LABELS[payment]}): ${client.name} queda debiendo ${money(left)}`
+                  : `${client.name} pagó todo (${PAYMENT_LABELS[payment]})`,
               );
               if (done) onClose();
             }}
@@ -580,6 +590,10 @@ function PaymentModal({ client, userId, onClose }: { client: Client; userId: str
           Son {money(-left)} de más: {client.name} solo debe {money(client.balanceCents)}.
         </p>
       )}
+      <div className="field">
+        <span className="field-label">Cómo pagó</span>
+        <Segmented className="pay-tabs" value={payment} onChange={setPayment} options={payOptions().filter(o => o.value !== 'credit')} />
+      </div>
       <div className="row3">
         <Field label="Cuánto abona">{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
         <DayField value={day} onChange={setDay} />
@@ -659,6 +673,7 @@ function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLi
   const [amount, setAmount] = useState(moneyField(Math.abs(entry.amountCents)));
   const [day, setDay] = useState(dayKeyOf(new Date(entry.date)));
   const [note, setNote] = useState(entry.note ?? '');
+  const [payment, setPayment] = useState<PaymentMethod>(entry.payment ?? 'cash');
   const cents = parseMoney(amount);
   const diff = cents ? (isPayment ? -cents : cents) - entry.amountCents : 0;
   const after = client.balanceCents + diff;
@@ -677,7 +692,7 @@ function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLi
             className="btn primary"
             disabled={!cents || (!isPayment && !note.trim()) || blocked}
             onClick={async () => {
-              const done = await run(async () => (await updateCreditEntry(db, entry.id, { amountCents: cents!, dayKey: day, note }, ownerId), true), 'Corregido: la cuenta se recalculó');
+              const done = await run(async () => (await updateCreditEntry(db, entry.id, { amountCents: cents!, dayKey: day, note, payment: isPayment ? payment : undefined }, ownerId), true), 'Corregido: la cuenta se recalculó');
               if (done) onClose();
             }}
           >
@@ -700,6 +715,12 @@ function EditCreditModal({ entry, client, ownerId, onClose }: { entry: AccountLi
         </p>
       )}
       <Field label={isPayment ? 'Cuánto abonó' : 'Monto de esta deuda'}>{id => <MoneyInput id={id} value={amount} onChange={setAmount} autoFocus currency={settings.currency} />}</Field>
+      {isPayment && (
+        <div className="field">
+          <span className="field-label">Cómo pagó</span>
+          <Segmented className="pay-tabs" value={payment} onChange={setPayment} options={payOptions().filter(o => o.value !== 'credit')} />
+        </div>
+      )}
       <div className="row2">
         <DayField value={day} onChange={setDay} />
         <NoteField label={isPayment ? 'Nota (opcional)' : 'De qué es (obligatorio)'} kind={isPayment ? 'payment' : 'charge'} value={note} onChange={setNote} />

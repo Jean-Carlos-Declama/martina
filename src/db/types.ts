@@ -160,6 +160,8 @@ export interface CreditEntry {
   saleId?: Id;
   userId: Id;
   note?: string;
+  /** Cómo pagó un abono (efectivo, Zelle, Cash App...). Los abonos viejos no lo tienen. */
+  payment?: PaymentMethod;
   /** Un abono o una deuda a mano que se anuló (ya no cuenta). */
   status?: 'void';
 }

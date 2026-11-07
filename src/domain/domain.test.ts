@@ -179,6 +179,18 @@ describe('ventas de la tienda', () => {
 });
 
 describe('fiado', () => {
+  it('el abono guarda cómo pagó (Zelle, Cash App...) y se puede corregir; fiado no es una forma de abonar', async () => {
+    const w = await newWorld();
+    const rosa = await newClient(w.db, 'Rosa');
+    await addCharge(w.db, rosa, 10000, w.owner.id, 'libreta');
+    const abono = await registerPayment(w.db, rosa, 4000, w.owner.id, undefined, undefined, 'zelle');
+    expect(await w.db.credit.get(abono.id)).toMatchObject({ kind: 'payment', amountCents: -4000, payment: 'zelle' });
+    await updateCreditEntry(w.db, abono.id, { amountCents: 4000, payment: 'cashapp' }, w.owner.id);
+    expect((await w.db.credit.get(abono.id))!.payment).toBe('cashapp');
+    await expect(registerPayment(w.db, rosa, 100, w.owner.id, undefined, undefined, 'credit')).rejects.toThrow(/no puede ser fiado/);
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(6000);
+  });
+
   it('fiar sube la deuda, abonar la baja, y no se abona más de lo que debe', async () => {
     const w = await newWorld();
     const p = await addProduct(w, {}, 10);
