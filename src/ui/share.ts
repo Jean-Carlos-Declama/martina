@@ -60,6 +60,7 @@ export function lotteryDayText(report: DayReport, settings: Settings): string {
     ...[paidBy(report.byPayment, money)].filter(Boolean),
     `Comisión ${t.commissionPct}%: ${money(t.commissionCents)}`,
     `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
+    ...(report.prizesToDebtCents > 0 ? [`(de los premios, ${money(report.prizesToDebtCents)} se rebajó de deudas)`] : []),
     t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}* (los premios y la comisión pasaron la venta)` : `*A entregar: ${money(t.deliverCents)}*`,
     report.creditCents > 0 ? `(incluye ${money(report.creditCents)} fiado, por cobrar)` : '',
     report.status === 'closed' ? '(día cerrado)' : '',
@@ -87,6 +88,7 @@ export function lotteryWeekText(report: LotteryPeriod, settings: Settings): stri
     ...[paidBy(report.byPayment, money)].filter(Boolean),
     `Comisión: ${money(t.commissionCents)}`,
     `Premios: ${money(t.prizesCents)} (${t.prizesCount})`,
+    ...(report.prizesToDebtCents > 0 ? [`(de los premios, ${money(report.prizesToDebtCents)} se rebajó de deudas)`] : []),
     t.deliverCents < 0 ? `*Faltante: ${money(t.deliverCents)}*` : `*A entregar: ${money(t.deliverCents)}*`,
     report.creditCents > 0 ? `(incluye ${money(report.creditCents)} fiado, por cobrar)` : '',
   ]

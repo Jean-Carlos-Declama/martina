@@ -96,6 +96,10 @@ export function Lottery() {
     const client = entry.kind === 'play' && entry.credit && entry.clientId ? await db.clients.get(entry.clientId) : undefined;
     if (client)
       message += `\nEra fiada: se le quita de su cuenta. ${client.name}: ahora ${balanceLabel(client.balanceCents, money)}; después ${balanceLabel(client.balanceCents - entry.amountCents, money)}.`;
+    // Un premio que se le rebajó de la deuda: la deuda vuelve.
+    const debtor = entry.kind === 'prize' && entry.toDebtCents && entry.clientId ? await db.clients.get(entry.clientId) : undefined;
+    if (debtor && entry.kind === 'prize' && entry.toDebtCents)
+      message += `\nSe le había rebajado de la deuda: ${money(entry.toDebtCents)} vuelve a su cuenta. ${debtor.name}: ahora ${balanceLabel(debtor.balanceCents, money)}; después ${balanceLabel(debtor.balanceCents + entry.toDebtCents, money)}.`;
     const reason = await askText({
       title: entry.kind === 'play' ? 'Quitar jugada' : 'Quitar premio',
       message,
@@ -115,7 +119,7 @@ export function Lottery() {
     const deliver = report.totals.deliverCents;
     const ok = await confirm({
       title: `Cerrar ${dayLabel(dayKey, false)}`,
-      message: `Venta: ${money(report.totals.salesCents)}\nComisión: ${money(report.totals.commissionCents)}\nPremios: ${money(report.totals.prizesCents)}\n${deliver < 0 ? 'Faltante' : 'A entregar'}: ${money(deliver)}${report.creditCents > 0 ? `\n(incluye ${money(report.creditCents)} fiado, por cobrar)` : ''}\n\nDespués de cerrar ya no se puede anotar ni anular nada de este día.`,
+      message: `Venta: ${money(report.totals.salesCents)}\nComisión: ${money(report.totals.commissionCents)}\nPremios: ${money(report.totals.prizesCents)}${report.prizesToDebtCents > 0 ? ` (${money(report.prizesToDebtCents)} rebajado de deudas)` : ''}\n${deliver < 0 ? 'Faltante' : 'A entregar'}: ${money(deliver)}${report.creditCents > 0 ? `\n(incluye ${money(report.creditCents)} fiado, por cobrar)` : ''}\n\nDespués de cerrar ya no se puede anotar ni anular nada de este día.`,
       okText: 'Cerrar el día',
     });
     if (ok) await run(() => closeDay(db, dayKey, owner.id), 'Día cerrado');
@@ -205,7 +209,12 @@ export function Lottery() {
           <button className="stat-button" onClick={() => editable && void changeCommission()} disabled={!editable} title="Cambiar el % de este día">
             <Stat label={`Comisión ${t.commissionPct}%`} value={money(t.commissionCents)} tone="good" sub={editable ? 'toca para cambiar el %' : 'lo que te ganas'} />
           </button>
-          <Stat label="Premios" value={money(t.prizesCents)} tone="bad" sub={plural(t.prizesCount, 'premio pagado', 'premios pagados')} />
+          <Stat
+            label="Premios"
+            value={money(t.prizesCents)}
+            tone="bad"
+            sub={`${plural(t.prizesCount, 'premio pagado', 'premios pagados')}${report.prizesToDebtCents > 0 ? ` · ${money(report.prizesToDebtCents)} rebajado de deudas` : ''}`}
+          />
           <DeliverStat cents={t.deliverCents} money={money} sub={report.creditCents > 0 && t.deliverCents >= 0 ? `incluye ${money(report.creditCents)} fiado` : undefined} />
         </div>
       )}
@@ -381,6 +390,11 @@ function EntryList(props: {
                   {e.status === 'void' ? ` · QUITADO${e.voidReason ? `: ${e.voidReason}` : ''}` : ''}
                 </small>
                 {e.note && e.status === 'done' && <small className="muted">Nota: {e.note}</small>}
+                {e.kind === 'prize' && e.status === 'done' && e.toDebtCents ? (
+                  <small className="good-text">
+                    Se le rebajó {money(e.toDebtCents)} de la deuda{e.toDebtCents < e.amountCents ? ` · se le pagó ${money(e.amountCents - e.toDebtCents)}` : ''}
+                  </small>
+                ) : null}
                 {e.status === 'done' && <EntryOwes balance={props.clientOf({ clientId: e.clientId, name: e.clientName })?.balanceCents ?? 0} />}
               </span>
               <span className="right">
@@ -451,6 +465,35 @@ function NameField({ value, onChange, hint }: { value: string; onChange: (value:
   );
 }
 
+/** Premio de alguien que debe: la marca para rebajárselo de la deuda, y cómo le queda la cuenta. */
+function PrizeDebtChoice(props: { name: string; owes: number; cents: number | null | undefined; checked: boolean; onChange: (checked: boolean) => void }) {
+  const { money } = useSession();
+  const { name, owes, cents, checked } = props;
+  const part = checked && cents ? Math.min(cents, owes) : 0;
+  return (
+    <div className="prize-debt">
+      <label className="check">
+        <input type="checkbox" checked={checked} onChange={e => props.onChange(e.target.checked)} /> Rebajárselo de lo que debe ({money(owes)})
+      </label>
+      {part > 0 && cents ? (
+        <p className="small-text">
+          {name} queda debiendo <strong className={owes - part > 0 ? 'bad-text' : 'good-text'}>{money(owes - part)}</strong>
+          {cents > part ? (
+            <>
+              {' '}
+              · le pagas <strong>{money(cents - part)}</strong> (lo que sobra)
+            </>
+          ) : (
+            ' · no le pagas nada'
+          )}
+        </p>
+      ) : !checked ? (
+        <p className="muted small-text">Se le paga todo el premio; lo que debe se queda igual.</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** Anotar una jugada o un premio (lo de arriba de la libreta). En un día anterior pide el PIN de la dueña. */
 function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
   const { settings, money, requireOwner } = useSession();
@@ -461,6 +504,8 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
   const [amount, setAmount] = useState('');
   const [lottery, setLottery] = useState(settings.lotteries[0] ?? '');
   const [payment, setPayment] = useState<PaymentMethod>('cash');
+  // Premio de alguien que debe: de fábrica se le rebaja de la deuda (se puede quitar la marca y pagárselo).
+  const [toDebt, setToDebt] = useState(true);
   const [requestId, setRequestId] = useState(newId);
   const [busy, setBusy] = useState(false);
   const client = exactClient(name, clients);
@@ -468,6 +513,7 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
   const pastDay = dayKey !== dayKeyOf();
   const fiado = kind === 'play' && payment === 'credit';
   const overLimit = fiado && !!client && !!cents && passesCreditLimit(client, cents);
+  const owes = kind === 'prize' && client && client.balanceCents > 0 ? client.balanceCents : 0;
 
   const submit = async () => {
     if (!cents) return toast('Escribe cuánto.', 'error');
@@ -493,13 +539,17 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
       } else newClientName = target.newClientName;
     }
     const base = { clientId, clientName: name, amountCents: cents, lottery: lottery || undefined, userId: byUser, requestId, dayKey };
-    const done = await run(() => (kind === 'play' ? addLotterySale(db, { ...base, credit: fiado, payment, newClientName }) : addPrize(db, base)));
+    const done = await run<LotteryEntry | Prize>(() =>
+      kind === 'play' ? addLotterySale(db, { ...base, credit: fiado, payment, newClientName }) : addPrize(db, { ...base, toDebt: owes > 0 && toDebt }),
+    );
     setBusy(false);
     if (done) {
-      toast(`${kind === 'play' ? 'Jugada' : 'Premio'} de ${done.clientName}: ${money(done.amountCents)}${newClientName ? ' (se registró como cliente)' : ''}`);
+      const debt = 'toDebtCents' in done && done.toDebtCents ? ` · se le rebajó ${money(done.toDebtCents)} de la deuda` : '';
+      toast(`${kind === 'play' ? 'Jugada' : 'Premio'} de ${done.clientName}: ${money(done.amountCents)}${debt}${newClientName ? ' (se registró como cliente)' : ''}`);
       setName('');
       setAmount('');
       setPayment('cash');
+      setToDebt(true);
       setRequestId(newId());
     }
   };
@@ -532,7 +582,7 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
           { value: 'prize', label: 'Pagar premio' },
         ]}
       />
-      {kind === 'prize' && <p className="muted small-text">Quién se sacó el premio y cuánto. Se paga del dinero del día y se resta de lo que entregas.</p>}
+      {kind === 'prize' && <p className="muted small-text">Quién se sacó el premio y cuánto. Se paga del dinero del día (o se le rebaja de lo que debe) y se resta de lo que entregas.</p>}
       <form
         onSubmit={e => {
           e.preventDefault();
@@ -566,6 +616,7 @@ function EntryForm({ userId, dayKey }: { userId: string; dayKey: string }) {
             />
           </div>
         )}
+        {owes > 0 && client && <PrizeDebtChoice name={client.name} owes={owes} cents={cents} checked={toDebt} onChange={setToDebt} />}
         <div className="quick">
           {QUICK_AMOUNTS.map(v => (
             <button type="button" key={v} className="btn small" onClick={() => setAmount(String(v))}>
@@ -595,6 +646,12 @@ function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; o
   const [payment, setPayment] = useState<PaymentMethod>(entry.kind === 'play' ? playPayment(entry) : 'cash');
   const isPlay = entry.kind === 'play';
   const fiada = isPlay && entry.credit;
+  // Premio: lo que ya se le había rebajado de la deuda, y cuánto debería el cliente (el de ahora) sin este premio.
+  const oldDebt = entry.kind === 'prize' ? (entry.toDebtCents ?? 0) : 0;
+  const [toDebt, setToDebt] = useState(oldDebt > 0);
+  const prizeClient = isPlay ? undefined : findClient(name);
+  const prizeOwes = prizeClient ? prizeClient.balanceCents + (prizeClient.id === entry.clientId ? oldDebt : 0) : 0;
+  const debtComesBack = oldDebt > 0 && (!toDebt || prizeOwes <= 0 || prizeClient?.id !== entry.clientId);
   // Jugada fiada con el nombre corregido: la deuda pasa de la cuenta del primero a la del nombre correcto.
   const changedClient = fiada && !!name.trim() && nameKey(name) !== nameKey(entry.clientName);
   // Jugada fiada: corregir el monto también cambia lo que debe el cliente.
@@ -617,7 +674,16 @@ function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; o
         newClientName = target.newClientName;
       }
     }
-    const changes = { clientId, newClientName, clientName: name, amountCents: cents, lottery: lottery || undefined, note, payment: isPlay && !fiada ? payment : undefined };
+    const changes = {
+      clientId,
+      newClientName,
+      clientName: name,
+      amountCents: cents,
+      lottery: lottery || undefined,
+      note,
+      payment: isPlay && !fiada ? payment : undefined,
+      toDebt: isPlay ? undefined : prizeOwes > 0 && toDebt,
+    };
     const ok = await run(async () => {
       if (isPlay) await updateLotterySale(db, entry.id, changes, ownerId);
       else await updatePrize(db, entry.id, changes, ownerId);
@@ -688,6 +754,12 @@ function EditEntryModal({ entry, ownerId, onClose, onRemove }: { entry: Entry; o
             </select>
           )}
         </Field>
+      )}
+      {!isPlay && prizeClient && prizeOwes > 0 && <PrizeDebtChoice name={prizeClient.name} owes={prizeOwes} cents={cents} checked={toDebt} onChange={setToDebt} />}
+      {debtComesBack && (
+        <p className="warn-text">
+          Lo que se le había rebajado a {entry.clientName} ({money(oldDebt)}) vuelve a su deuda.
+        </p>
       )}
       {isPlay && !fiada && (
         <Field label="Cómo pagó">

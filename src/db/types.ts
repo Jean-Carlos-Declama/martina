@@ -150,9 +150,10 @@ export interface CreditEntry {
   date: string;
   /**
    * sale: venta de la tienda fiada · lottery: lotería fiada · payment: abono · charge: deuda anotada a mano (ej. lo que
-   * debía en la libreta) · saleVoid / adjust: anulación, devolución o corrección de una venta o jugada.
+   * debía en la libreta) · saleVoid / adjust: anulación, devolución o corrección de una venta o jugada · prize: premio
+   * de lotería que se le rebajó de lo que debía (en vez de pagárselo en efectivo; `saleId` es el premio).
    */
-  kind: 'sale' | 'lottery' | 'payment' | 'charge' | 'saleVoid' | 'adjust';
+  kind: 'sale' | 'lottery' | 'payment' | 'charge' | 'saleVoid' | 'adjust' | 'prize';
   /** + aumenta la deuda, - la baja. */
   amountCents: number;
   /** Lo que quedó debiendo al anotarlo (la pantalla calcula el saldo por fecha, por si se anota algo con fecha anterior). */
@@ -198,6 +199,11 @@ export interface Prize {
   clientName: string;
   amountCents: number;
   lottery?: string;
+  /**
+   * Lo que se le rebajó de lo que debía (no se le pagó en efectivo). Debe 90 y se saca 50: queda debiendo 40. Si el
+   * premio es más que la deuda, se rebaja toda y el resto se le paga. 0 o vacío = se le pagó todo.
+   */
+  toDebtCents?: number;
   userId: Id;
   /** Comentario (ej. por qué se corrigió). */
   note?: string;

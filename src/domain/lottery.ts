@@ -1,3 +1,4 @@
+import { add } from 'dexie';
 import { getSettings, type MartinaDb } from '../db/database';
 import type { Day, DayTotals, Id, LotteryEntry, PaymentMethod, Prize } from '../db/types';
 import { audit } from './audit';
@@ -110,6 +111,8 @@ export interface EntryChanges {
   payment?: PaymentMethod;
   amountCents: number;
   lottery?: string;
+  /** Solo premios: rebajarlo de lo que debe el cliente (vacío = como estaba). */
+  toDebt?: boolean;
 }
 
 /** Corrige una jugada mal anotada (cliente, monto o lotería) mientras su día está abierto: el cuadre se recalcula solo. */
@@ -164,6 +167,11 @@ export interface PrizeInput {
   clientName?: string;
   amountCents: number;
   lottery?: string;
+  /**
+   * Rebajarlo de lo que debe el cliente (tiene que estar registrado): en vez de pagárselo, se le baja la deuda. Si
+   * el premio es más que lo que debe, se rebaja toda la deuda y el resto se le paga.
+   */
+  toDebt?: boolean;
   note?: string;
   userId: Id;
   requestId: string;
@@ -171,11 +179,38 @@ export interface PrizeInput {
   dayKey?: string;
 }
 
-/** Paga un premio a un cliente: sale del dinero del día y resta de lo que se entrega. */
+/** Las tablas que tocan los premios (el rebajo de la deuda va en la cuenta del cliente). */
+const prizeTables = (database: MartinaDb) => [database.prizes, database.days, database.clients, database.credit, database.settings, database.audit];
+
+/**
+ * Rebaja un premio de lo que debe el cliente (lo más que se puede: no lo deja con saldo a favor). Devuelve cuánto se
+ * rebajó (0 si no debe nada). Tiene que llamarse dentro de una transacción con clients y credit.
+ */
+async function prizeToDebt(database: MartinaDb, prize: Pick<Prize, 'id' | 'clientId' | 'amountCents' | 'lottery' | 'date'>, userId: Id): Promise<number> {
+  if (!prize.clientId) return 0;
+  const client = await database.clients.get(prize.clientId);
+  if (!client || client.balanceCents <= 0) return 0;
+  const cents = Math.min(prize.amountCents, client.balanceCents);
+  await addCredit(database, client.id, -cents, 'prize', userId, prize.id, prize.lottery, prize.date);
+  return cents;
+}
+
+/** Deshace el rebajo de un premio (se corrigió o se quitó): la deuda vuelve como estaba. */
+async function undoPrizeDebt(database: MartinaDb, prizeId: Id): Promise<void> {
+  const lines = (await database.credit.where('saleId').equals(prizeId).toArray()).filter(l => l.kind === 'prize' && l.status !== 'void');
+  for (const line of lines) {
+    const client = await database.clients.get(line.clientId);
+    await database.credit.update(line.id, { status: 'void' });
+    // Súmale (no "ponle X"), como en addCredit; si estaba archivado y vuelve a deber, se reactiva.
+    await database.clients.update(line.clientId, { balanceCents: add(-line.amountCents), ...(client && !client.active && client.balanceCents - line.amountCents > 0 ? { active: true } : {}) });
+  }
+}
+
+/** Paga un premio a un cliente: sale del dinero del día (o se le rebaja de lo que debe) y resta de lo que se entrega. */
 export async function addPrize(database: MartinaDb, input: PrizeInput): Promise<Prize> {
   if (!(input.amountCents > 0)) throw new BusinessError('El premio tiene que ser mayor que cero.');
   const dayKey = targetDay(input.dayKey);
-  return database.transaction('rw', [database.prizes, database.days, database.clients, database.settings, database.audit], async () => {
+  return database.transaction('rw', prizeTables(database), async () => {
     const repeated = await database.prizes.where('requestId').equals(input.requestId).first();
     if (repeated) return repeated;
     await ensureDayOpen(database, dayKey);
@@ -192,41 +227,58 @@ export async function addPrize(database: MartinaDb, input: PrizeInput): Promise<
       status: 'done',
       requestId: input.requestId,
     };
+    if (input.toDebt) prize.toDebtCents = (await prizeToDebt(database, prize, input.userId)) || undefined;
     await database.prizes.add(prize);
-    await audit(database, input.userId, 'premio', 'premio', prize.id, `${dayKey} · ${prize.clientName}: ${prize.amountCents / 100}`);
+    const debt = prize.toDebtCents ? ` (rebajado de la deuda: ${prize.toDebtCents / 100})` : '';
+    await audit(database, input.userId, 'premio', 'premio', prize.id, `${dayKey} · ${prize.clientName}: ${prize.amountCents / 100}${debt}`);
     return prize;
   });
 }
 
-/** Corrige un premio (quién o cuánto) mientras su día está abierto: lo que se entrega se recalcula solo. */
+/**
+ * Corrige un premio (quién, cuánto, o si se rebaja de la deuda) mientras su día está abierto: lo que se entrega se
+ * recalcula solo, y si se había rebajado de una deuda, el rebajo se rehace con lo nuevo.
+ */
 export async function updatePrize(database: MartinaDb, prizeId: Id, changes: EntryChanges, userId: Id): Promise<void> {
   if (!(changes.amountCents > 0)) throw new BusinessError('El premio tiene que ser mayor que cero.');
-  await database.transaction('rw', database.prizes, database.days, database.clients, database.settings, database.audit, async () => {
+  await database.transaction('rw', prizeTables(database), async () => {
     const prize = await database.prizes.get(prizeId);
     if (!prize || prize.status === 'void') throw new BusinessError('Ese premio no existe o ya está anulado.');
     await ensureDayOpen(database, prize.dayKey);
     const clientName = await nameFor(database, changes.clientId, changes.clientName);
     const amount = Math.round(changes.amountCents);
+    const lottery = changes.lottery?.trim() || undefined;
+    // Si no dice, se queda como estaba. Si nada de la deuda cambió, el rebajo se deja tal cual.
+    const toDebt = changes.toDebt ?? !!prize.toDebtCents;
+    const sameDebt = toDebt && !!prize.toDebtCents && changes.clientId === prize.clientId && amount === prize.amountCents;
+    let toDebtCents = prize.toDebtCents ?? 0;
+    if (!sameDebt) {
+      if (prize.toDebtCents) await undoPrizeDebt(database, prizeId);
+      toDebtCents = toDebt ? await prizeToDebt(database, { id: prizeId, clientId: changes.clientId, amountCents: amount, lottery, date: prize.date }, userId) : 0;
+    }
     await database.prizes.update(prizeId, {
       clientId: changes.clientId,
       clientName,
       amountCents: amount,
-      lottery: changes.lottery?.trim() || undefined,
+      lottery,
+      toDebtCents,
       ...(changes.note?.trim() ? { note: changes.note.trim() } : {}),
     });
-    await audit(database, userId, 'corregir', 'premio', prizeId, `${prize.clientName} ${prize.amountCents / 100} → ${clientName} ${amount / 100}${changes.note?.trim() ? `. ${changes.note.trim()}` : ''}`);
+    const debt = toDebtCents !== (prize.toDebtCents ?? 0) ? ` (rebajado de la deuda: ${(prize.toDebtCents ?? 0) / 100} → ${toDebtCents / 100})` : '';
+    await audit(database, userId, 'corregir', 'premio', prizeId, `${prize.clientName} ${prize.amountCents / 100} → ${clientName} ${amount / 100}${debt}${changes.note?.trim() ? `. ${changes.note.trim()}` : ''}`);
   });
 }
 
-/** Anula un premio mal anotado (solo si su día sigue abierto). */
+/** Anula un premio mal anotado (solo si su día sigue abierto). Si se había rebajado de una deuda, la deuda vuelve. */
 export async function voidPrize(database: MartinaDb, prizeId: Id, userId: Id, reason: string): Promise<void> {
   if (!reason.trim()) throw new BusinessError('Escribe por qué se anula.');
-  await database.transaction('rw', database.prizes, database.days, database.settings, database.audit, async () => {
+  await database.transaction('rw', prizeTables(database), async () => {
     const prize = await database.prizes.get(prizeId);
     if (!prize) throw new BusinessError('El premio no existe.');
     if (prize.status === 'void') return;
     await ensureDayOpen(database, prize.dayKey);
     await database.prizes.update(prizeId, { status: 'void', voidReason: reason.trim() });
+    if (prize.toDebtCents) await undoPrizeDebt(database, prizeId);
     await audit(database, userId, 'anular', 'premio', prizeId, `${prize.clientName}: ${prize.amountCents / 100}. ${reason.trim()}`);
   });
 }
@@ -258,6 +310,8 @@ export interface DayReport {
   byLottery: { name: string; salesCents: number; prizesCents: number }[];
   /** Lo que se fió ese día (no entró en efectivo, pero igual se entrega). */
   creditCents: number;
+  /** De los premios, lo que se rebajó de deudas (no salió en efectivo; igual cuenta como premio pagado). */
+  prizesToDebtCents: number;
   /** Cuánto entró por cada forma de pago (efectivo, Zelle, Cash App, fiado...), de más a menos. */
   byPayment: { payment: PaymentMethod; cents: number }[];
 }
@@ -306,11 +360,13 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
     payments.set(paid, (payments.get(paid) ?? 0) + entry.amountCents);
   }
   let prizesCents = 0;
+  let prizesToDebtCents = 0;
   for (const prize of prizes) {
     const r = row(prize.clientName, prize.clientId);
     r.prizes++;
     r.prizesCents += prize.amountCents;
     prizesCents += prize.amountCents;
+    prizesToDebtCents += prize.toDebtCents ?? 0;
     lottery(prize.lottery).prizesCents += prize.amountCents;
   }
   const commissionCents = percentOf(salesCents, commissionPct);
@@ -331,6 +387,7 @@ export async function computeDay(database: MartinaDb, dayKey: string): Promise<D
     byLottery: [...lotteries.values()].sort((a, b) => b.salesCents - a.salesCents),
     byPayment: [...payments].map(([payment, cents]) => ({ payment, cents })).sort((a, b) => b.cents - a.cents),
     creditCents,
+    prizesToDebtCents,
   };
 }
 
@@ -386,6 +443,8 @@ export interface LotteryPeriod {
   byLottery: { name: string; salesCents: number; commissionCents: number; prizesCents: number }[];
   /** Lo que se fió en el período (no entró en efectivo). */
   creditCents: number;
+  /** De los premios del período, lo que se rebajó de deudas. */
+  prizesToDebtCents: number;
   /** Cuánto entró por cada forma de pago en el período. */
   byPayment: { payment: PaymentMethod; cents: number }[];
 }
@@ -399,10 +458,12 @@ export async function lotteryReport(database: MartinaDb, from: string, to: strin
   const lotteries = new Map<string, { name: string; salesCents: number; commissionCents: number; prizesCents: number }>();
   const payments = new Map<PaymentMethod, number>();
   let creditCents = 0;
+  let prizesToDebtCents = 0;
   for (const dayKey of [...keys].sort()) {
     const report = await computeDay(database, dayKey);
     days.push({ dayKey, status: report.status, totals: report.totals });
     creditCents += report.creditCents;
+    prizesToDebtCents += report.prizesToDebtCents;
     for (const p of report.byPayment) payments.set(p.payment, (payments.get(p.payment) ?? 0) + p.cents);
     for (const l of report.byLottery) {
       const row = lotteries.get(l.name) ?? { name: l.name, salesCents: 0, commissionCents: 0, prizesCents: 0 };
@@ -428,5 +489,6 @@ export async function lotteryReport(database: MartinaDb, from: string, to: strin
     byLottery: [...lotteries.values()].sort((a, b) => b.salesCents - a.salesCents),
     byPayment: [...payments].map(([payment, cents]) => ({ payment, cents })).sort((a, b) => b.cents - a.cents),
     creditCents,
+    prizesToDebtCents,
   };
 }

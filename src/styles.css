@@ -1860,6 +1860,18 @@ body:has(.overlay) .toasts {
 .pay-field {
   margin-top: 12px;
 }
+/* Premio de alguien que debe: rebajárselo de la deuda. */
+.prize-debt {
+  margin-top: 8px;
+}
+.prize-debt p {
+  margin: 0 0 4px;
+}
+.check input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
 
 /* ---------- Formas de pago con su color y su logo (Zelle morado, Cash App verde, efectivo verde billete...) ---------- */
 :root {

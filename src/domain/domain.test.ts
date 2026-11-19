@@ -453,6 +453,68 @@ describe('lotería (el cuadre del día)', () => {
   const prize = (w: Awaited<ReturnType<typeof newWorld>>, amountCents: number, clientName: string) =>
     addPrize(w.db, { amountCents, clientName, userId: w.employee.id, requestId: newId() });
 
+  it('premio de alguien que debe: se le rebaja de la deuda (Juan debe 90, se saca 50: queda debiendo 40)', async () => {
+    const w = await newWorld();
+    const juan = (await createClient(w.db, { name: 'Juan' }, w.owner.id)).id;
+    await addCharge(w.db, juan, 9000, w.owner.id, 'de la libreta');
+    // Hoy jugó 100 y pagó en efectivo; de eso se sacó 50.
+    await addLotterySale(w.db, { amountCents: 10000, clientId: juan, userId: w.employee.id, requestId: newId() });
+    const won = await addPrize(w.db, { amountCents: 5000, clientId: juan, toDebt: true, userId: w.employee.id, requestId: newId() });
+    expect(won.toDebtCents).toBe(5000);
+    expect((await w.db.clients.get(juan))!.balanceCents).toBe(4000);
+    const line = (await clientAccount(w.db, juan)).find(l => l.kind === 'prize')!;
+    // (Sin mirar el orden: en la prueba las líneas pueden caer en el mismo milisegundo.)
+    expect(line).toMatchObject({ amountCents: -5000, saleId: won.id });
+    // El cuadre no cambia: el premio igual se resta de lo que se entrega (solo que no salió en efectivo).
+    const day = await computeDay(w.db, today());
+    expect(day.totals).toMatchObject({ salesCents: 10000, prizesCents: 5000, deliverCents: 10000 - day.totals.commissionCents - 5000 });
+    expect(day.prizesToDebtCents).toBe(5000);
+    // El rebajo no se corrige en la cuenta: se corrige el premio en Lotería.
+    await expect(updateCreditEntry(w.db, line.id, { amountCents: 100 }, w.owner.id)).rejects.toThrow(/viene de un premio/);
+    await expect(voidCreditEntry(w.db, line.id, w.owner.id, 'x')).rejects.toThrow(/viene de un premio/);
+
+    // Corregir el premio a 20: la deuda se rehace (90 - 20 = 70).
+    await updatePrize(w.db, won.id, { clientId: juan, clientName: 'Juan', amountCents: 2000 }, w.owner.id);
+    expect((await w.db.clients.get(juan))!.balanceCents).toBe(7000);
+    expect((await w.db.prizes.get(won.id))!.toDebtCents).toBe(2000);
+    // Si al final se le pagó en efectivo, la deuda vuelve completa.
+    await updatePrize(w.db, won.id, { clientId: juan, clientName: 'Juan', amountCents: 2000, toDebt: false }, w.owner.id);
+    expect((await w.db.clients.get(juan))!.balanceCents).toBe(9000);
+    expect((await w.db.prizes.get(won.id))!.toDebtCents).toBe(0);
+    await updatePrize(w.db, won.id, { clientId: juan, clientName: 'Juan', amountCents: 5000, toDebt: true }, w.owner.id);
+    expect((await w.db.clients.get(juan))!.balanceCents).toBe(4000);
+    // Quitar el premio: la deuda vuelve.
+    await voidPrize(w.db, won.id, w.owner.id, 'no era de él');
+    expect((await w.db.clients.get(juan))!.balanceCents).toBe(9000);
+    const account = await clientAccount(w.db, juan);
+    expect(account.filter(l => l.kind === 'prize' && l.status !== 'void')).toHaveLength(0);
+    expect(account[account.length - 1].runningCents).toBe(9000);
+  });
+
+  it('premio más grande que la deuda: se rebaja toda y el resto se le paga; si no debe, se le paga todo', async () => {
+    const w = await newWorld();
+    const rosa = (await createClient(w.db, { name: 'Rosa' }, w.owner.id)).id;
+    await addCharge(w.db, rosa, 3000, w.owner.id, 'de la libreta');
+    const big = await addPrize(w.db, { amountCents: 5000, clientId: rosa, toDebt: true, userId: w.owner.id, requestId: newId() });
+    expect(big.toDebtCents).toBe(3000);
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(0);
+    // Ya no debe: el próximo premio se le paga todo (nunca le queda saldo a favor por un premio).
+    const next = await addPrize(w.db, { amountCents: 2000, clientId: rosa, toDebt: true, userId: w.owner.id, requestId: newId() });
+    expect(next.toDebtCents).toBeUndefined();
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(0);
+    // Sin cliente registrado no hay deuda que rebajar.
+    const loose = await addPrize(w.db, { amountCents: 1000, clientName: 'Alguien', toDebt: true, userId: w.owner.id, requestId: newId() });
+    expect(loose.toDebtCents).toBeUndefined();
+    expect((await computeDay(w.db, today())).prizesToDebtCents).toBe(3000);
+    // Pasar el premio a otro cliente: la deuda de Rosa vuelve y se le rebaja al otro (lo que deba).
+    const pedro = (await createClient(w.db, { name: 'Pedro' }, w.owner.id)).id;
+    await addCharge(w.db, pedro, 1000, w.owner.id, 'de la libreta');
+    await updatePrize(w.db, big.id, { clientId: pedro, clientName: 'Pedro', amountCents: 5000 }, w.owner.id);
+    expect((await w.db.clients.get(rosa))!.balanceCents).toBe(3000);
+    expect((await w.db.clients.get(pedro))!.balanceCents).toBe(0);
+    expect((await w.db.prizes.get(big.id))!.toDebtCents).toBe(1000);
+  });
+
   it('como la libreta: clientes, veces que jugaron y cobraron, venta, comisión, premios y lo que se entrega', async () => {
     const w = await newWorld();
     await saveSettings({ ...(await getSettings(w.db)), commissionPct: 10 }, w.db);

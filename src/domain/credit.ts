@@ -95,7 +95,13 @@ function reactivate(client: { active: boolean; balanceCents: number }, change: n
 function checkManual(entry: CreditEntry | undefined): asserts entry is CreditEntry {
   if (!entry || entry.status === 'void') throw new BusinessError('Ese movimiento no existe o ya está anulado.');
   if (entry.kind !== 'payment' && entry.kind !== 'charge')
-    throw new BusinessError(entry.kind === 'lottery' ? 'Ese fiado viene de una jugada: corrígelo en Lotería, en el día que se anotó.' : 'Ese fiado viene de una venta: corrígelo en Ventas.');
+    throw new BusinessError(
+      entry.kind === 'prize'
+        ? 'Ese rebajo viene de un premio: corrígelo en Lotería, en el día del premio.'
+        : entry.kind === 'lottery'
+          ? 'Ese fiado viene de una jugada: corrígelo en Lotería, en el día que se anotó.'
+          : 'Ese fiado viene de una venta: corrígelo en Ventas.',
+    );
 }
 
 /**

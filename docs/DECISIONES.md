@@ -96,6 +96,7 @@ Una app para el iPad de Martina con dos partes:
 - **Días anteriores:** con las flechas o el calendario se va a un día anterior y se anotan jugadas o premios que faltaron, si ese día sigue abierto. Si está cerrado, la dueña lo reabre. Un empleado necesita el PIN de la dueña. No se puede anotar en días que no han llegado. Al cambiar de día, el formulario empieza limpio.
 - **Cierre:** solo la dueña cierra el día. Se guardan los totales y ya no se puede anotar ni anular nada de ese día. Para corregir, ella lo reabre y tiene que dar un motivo (queda en la bitácora). El cierre de la lotería **no** frena las ventas de la tienda.
 - **Fiado:** la lotería fiada va a la misma cuenta del cliente que el fiado de la tienda, y se paga con abonos.
+- **Premio de alguien que debe (0.5.7):** al pagar el premio a un cliente registrado que debe, sale marcado «Rebajárselo de lo que debe»; se puede desmarcar para pagárselo. Se rebaja lo más que se puede sin dejarle saldo a favor: si debe 90 y se saca 50, queda debiendo 40; si debe 30 y se saca 50, la deuda queda en 0 y se le pagan 20. El premio guarda `toDebtCents`, y la cuenta lleva una línea `kind: 'prize'` con `saleId` = el premio. Esa línea no se corrige en la cuenta: se corrige o se quita el premio, y el rebajo se rehace o la deuda vuelve (la línea queda ANULADA). **El cuadre no cambia:** el premio igual se resta de lo que se entrega; es como pagarle el premio y que él abone lo mismo. El día, el cierre y el WhatsApp dicen cuánto de los premios se rebajó de deudas.
 
 ## 6b. Clientes y lo que deben
 

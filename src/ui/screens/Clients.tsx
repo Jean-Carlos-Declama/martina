@@ -31,6 +31,7 @@ const CREDIT_LABELS: Record<CreditEntry['kind'], string> = {
   charge: 'Deuda anotada a mano',
   saleVoid: 'Venta anulada',
   adjust: 'Devolución / anulación',
+  prize: 'Premio rebajado de la deuda',
 };
 
 export default function Clients({ initialFilter = 'all' }: { initialFilter?: 'all' | 'debt' }) {
@@ -432,6 +433,7 @@ function ClientDetail({ id, onClose, onEdit }: { id: string; onClose: () => void
                         ) : (
                           canEdit && <small className="muted"> · se corrige en {h.kind === 'lottery' ? 'Lotería' : 'Ventas'}</small>
                         ))}
+                      {h.kind === 'prize' && h.status !== 'void' && canEdit && <small className="muted"> · se corrige en Lotería</small>}
                     </td>
                     <td className={`num amt ${h.amountCents > 0 ? 'bad-text' : 'good-text'}`}>
                       {h.amountCents > 0 ? '+' : '−'}
